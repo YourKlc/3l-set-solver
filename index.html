@@ -26,6 +26,9 @@
   --c-atk:#e0484d;
   --c-class:#c98a1b;
   --c-crit:#d6409f;
+  --c-ied:#2f8f8f;
+  --c-dmg:#bf6a3c;
+  --c-bd:#7b8b2f;
   --c-other:#8590a3;
 }
 @media (prefers-color-scheme: dark){
@@ -49,6 +52,9 @@
     --c-atk:#ff6a70;
     --c-class:#e0a93e;
     --c-crit:#e263ae;
+    --c-ied:#46b3b3;
+    --c-dmg:#e0834f;
+    --c-bd:#a3b55a;
     --c-other:#9aa5b8;
     color-scheme:dark;
   }
@@ -97,26 +103,28 @@ body{
 .pill[data-state="over"]{background:color-mix(in oklab,var(--bad) 16%,var(--panel));border-color:transparent;color:var(--bad)}
 .pill[data-state="zero"]{background:var(--sunk);border-color:var(--line);color:var(--muted)}
 /* 识别中的呼吸光 + 三点跳动 */
-#scanPill[data-state="part"]{animation:pillPulse 1.5s ease-in-out infinite}
+#scanPill[data-state="part"]{animation:pillPulse 1.5s ease-in-out infinite;font-weight:700}
 @keyframes pillPulse{
   0%,100%{box-shadow:0 0 0 0 color-mix(in oklab,var(--warn) 38%,transparent)}
   55%{box-shadow:0 0 0 6px color-mix(in oklab,var(--warn) 0%,transparent)}
 }
-.scan-dots{display:inline-block;margin-left:3px}
+.scan-dots{display:inline-block;margin-left:3px;font-size:13px;line-height:1}
 .scan-dots i{font-style:normal;opacity:.28;animation:dotBlink 1.2s infinite}
+.scan-dots i::after{content:"·"}
 .scan-dots i:nth-child(2){animation-delay:.22s}
 .scan-dots i:nth-child(3){animation-delay:.44s}
 @keyframes dotBlink{0%,65%,100%{opacity:.22}28%{opacity:1}}
 .scan-spin{
-  display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px;
-  border:2px solid color-mix(in oklab,var(--warn) 40%,transparent);border-top-color:var(--warn);
-  border-radius:50%;animation:scanSpin .9s linear infinite;
+  display:inline-block;width:12px;height:12px;margin-right:7px;vertical-align:-2px;
+  border:3px solid var(--accent);border-top-color:transparent;
+  border-radius:50%;box-shadow:0 0 8px color-mix(in oklab,var(--accent) 45%,transparent);
+  animation:scanSpin .7s linear infinite;
 }
 @keyframes scanSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){
   #scanPill[data-state="part"]{animation:none}
   .scan-dots i{animation:none;opacity:.6}
-  .scan-spin{animation:none;border-top-color:color-mix(in oklab,var(--warn) 40%,transparent)}
+  .scan-spin{animation:none;border-top-color:var(--accent)}
 }
 
 /* ===== 目标词条 ===== */
@@ -227,6 +235,9 @@ button.ghost:disabled{opacity:.45;cursor:not-allowed}
 .s-pirate{--c:var(--c-class)}
 .s-thief{--c:var(--c-class)}
 .s-warrior{--c:var(--c-class)}
+.s-ied{--c:var(--c-ied)}
+.s-dmg{--c:var(--c-dmg)}
+.s-bd{--c:var(--c-bd)}
 .s-other{--c:var(--c-other)}
 button.del{
   border:0;background:transparent;color:var(--muted);font-size:15px;line-height:1;cursor:pointer;
@@ -593,6 +604,9 @@ const TAGS = [
   { k:'PIRATE',  name:'Pirate',           group:'class' },
   { k:'THIEF',   name:'Thief',            group:'class' },
   { k:'WARRIOR', name:'Warrior',          group:'class' },
+  { k:'IED',     name:'IED',              group:'extra' },
+  { k:'DMG',     name:'Dmg',              group:'extra' },
+  { k:'BD',      name:'BD',               group:'extra' },
   { k:'OTHER',   name:'Other',            group:'other' }
 ];
 const TAGMAP = {};
@@ -2154,6 +2168,10 @@ const TAG_ALIAS = [
   { k:'ATK',     w:['ATTACK', 'POWER'] },
   { k:'ATK',     w:['ATK'] },
   { k:'BOW',     w:['BOWMAN'] },
+  { k:'IED',     w:['IGNORE', 'DEFENSE'] },
+  { k:'IED',     w:['IGNORE', 'DEFENCE'] },
+  { k:'BD',      w:['BOSS', 'DAMAGE'] },
+  { k:'DMG',     w:['DAMAGE', 'ENHANCEMENT'] },
   { k:'CD',      w:['CRITICAL', 'DAMAGE'] },
   { k:'CD',      w:['CRIT', 'DMG'] },
   { k:'MAGE',    w:['MAGICIAN'] },
@@ -2181,7 +2199,8 @@ function tokensOf(ln) {
   return toks;
 }
 
-/* 一行里能对上哪些词条（整词或相邻整词），每个词条只留最高分那处 */
+/* 一行里能对上哪些词条（整词或相邻整词），每个词条只留最高分那处。
+   同一段文字只能算一条：BOSS DAMAGE 与 DAMAGE ENHANCEMENT 会重叠，只留更像的那条 */
 function matchTagsInLine(ln) {
   const toks = tokensOf(ln);
   const hits = [];
@@ -2197,8 +2216,19 @@ function matchTagsInLine(ln) {
       if (score > 0) hits.push({ k:al.k, score:score, at:i, len:n });
     }
   });
-  const best = {};
+  /* 贪心去重叠：分高的、词多的、位置靠前的先占位 */
+  hits.sort((a, b) => b.score - a.score || b.len - a.len || a.at - b.at);
+  const taken = [];
+  const kept = [];
   hits.forEach(h => {
+    let clash = false;
+    for (let i = 0; i < taken.length; i++) {
+      if (h.at < taken[i].at + taken[i].len && taken[i].at < h.at + h.len) { clash = true; break; }
+    }
+    if (!clash) { taken.push(h); kept.push(h); }
+  });
+  const best = {};
+  kept.forEach(h => {
     const cur = best[h.k];
     if (!cur || h.score > cur.score) best[h.k] = h;
   });
