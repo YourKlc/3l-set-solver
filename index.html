@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3L 套装求解器 · Bowman 版</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%230d7a6f'/%3E%3Ctext%20x='32'%20y='45'%20font-size='34'%20fill='%23ffffff'%20font-family='sans-serif'%20text-anchor='middle'%3E3%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f5f6f8;
+  --panel:#ffffff;
+  --line:#e3e6eb;
+  --ink:#20262e;
+  --muted:#6d7480;
+  --accent:#0d7a6f;
+  --accent-ink:#075d55;
+  --accent-soft:#e5f3f0;
+  --ok:#16803c;
+  --warn:#b45309;
+  --bad:#b0342a;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans SC",system-ui,-apple-system,sans-serif;
+  font-size:14px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1160px;margin:0 auto;padding:22px 20px 40px}
+
+/* ===== 顶部 ===== */
+.bar{
+  display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;
+  padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--line);
+}
+.bar h1{margin:0;font-size:21px;letter-spacing:.5px}
+.bar h1 small{font-size:12px;font-weight:400;color:var(--muted);margin-left:8px;letter-spacing:0}
+.bar p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.mode-switch{display:flex;gap:8px;flex-wrap:wrap}
+.mode-btn{
+  border:1px solid var(--line);background:#fff;color:var(--muted);
+  padding:7px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:inherit;
+  transition:border-color .15s,color .15s,background .15s;
+}
+.mode-btn:hover{border-color:#cdd2d9;color:var(--ink)}
+.mode-btn[data-active="1"]{background:var(--accent-soft);border-color:#afd6cf;color:var(--accent-ink);font-weight:600}
+
+/* ===== 卡片 ===== */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.card + .card{margin-top:14px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.card-head h2{margin:0;font-size:14px;font-weight:600;letter-spacing:.3px}
+.card-head h2 span{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px}
+.pill{
+  font-size:12px;padding:3px 9px;border-radius:999px;background:#f1f3f5;color:var(--muted);
+  border:1px solid var(--line);white-space:nowrap;
+}
+.pill[data-state="ok"]{background:#eaf7ee;border-color:#c2e3cc;color:var(--ok)}
+.pill[data-state="part"]{background:#fdf3e6;border-color:#e8d3ae;color:var(--warn)}
+.pill[data-state="zero"]{background:#f0f1f4;border-color:var(--line);color:var(--muted)}
+
+/* ===== 目标词条 ===== */
+.target-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+@media (max-width:900px){.target-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.target-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.target{
+  border:1px solid var(--line);border-radius:9px;padding:8px 9px;background:#fbfbfc;
+  display:flex;flex-direction:column;gap:2px;min-width:0;
+}
+.target[data-state="ok"]{background:#f0f8f2;border-color:#c7e2ce}
+.target[data-state="over"]{background:#fdf0ef;border-color:#e8c3bf}
+.target .tname{font-size:12px;color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.target .tval{font-size:15px;font-weight:600;letter-spacing:.3px}
+.target .tval em{font-style:normal;font-size:11px;font-weight:400;color:var(--muted);margin-left:2px}
+.target[data-state="ok"] .tval{color:var(--ok)}
+.target[data-state="over"] .tval{color:var(--bad)}
+.target[data-state="part"] .tval{color:var(--warn)}
+.mode-note{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.55}
+
+/* ===== 双栏 ===== */
+.cols{display:grid;grid-template-columns:420px minmax(0,1fr);gap:14px;margin-top:14px;align-items:start}
+@media (max-width:980px){.cols{grid-template-columns:minmax(0,1fr)}}
+.col{min-width:0}
+
+/* ===== 添加装备 ===== */
+.slot-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.slot-tab{
+  border:1px solid var(--line);background:#fff;color:var(--muted);font-family:inherit;
+  padding:5px 10px;border-radius:7px;font-size:12.5px;cursor:pointer;
+}
+.slot-tab:hover{border-color:#cdd2d9;color:var(--ink)}
+.slot-tab[data-active="1"]{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.slot-tab .cnt{display:inline-block;margin-left:5px;font-size:11px;opacity:.75}
+
+.tag-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+@media (max-width:560px){.tag-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tbtn{
+  position:relative;border:1px solid var(--line);background:#fff;border-radius:7px;
+  padding:7px 8px;font-size:12px;font-family:inherit;color:var(--ink);
+  cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:border-color .12s,background .12s;
+}
+.tbtn[data-group="class"]{border-color:#eee1c9}
+.tbtn[data-group="crit"]{border-color:#eed6d2}
+.tbtn[data-group="other"]{color:var(--muted)}
+.tbtn[data-selected="1"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.tbtn[data-selected="1"]::after{
+  content:attr(data-order);position:absolute;top:2px;right:4px;
+  font-size:10px;color:var(--accent);font-weight:700;
+}
+.preview{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 10px;
+}
+.pline{
+  border:1px dashed var(--line);border-radius:7px;padding:7px 8px;min-height:44px;
+  background:#fbfbfc;display:flex;flex-direction:column;gap:2px;
+}
+.pline .ph{font-size:10px;color:#a3a9b3;letter-spacing:.5px}
+.pline .pv{font-size:12px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pline[data-empty="1"] .pv{color:#b3b8c1;font-weight:400}
+button.primary{
+  width:100%;border:1px solid var(--accent);background:var(--accent);color:#fff;
+  font-family:inherit;font-size:13px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;
+}
+button.primary:disabled{background:#e8eaee;border-color:#e8eaee;color:#a8aeb8;cursor:not-allowed}
+button.ghost{
+  border:1px solid var(--line);background:#fff;color:var(--muted);font-family:inherit;
+  font-size:12px;padding:6px 10px;border-radius:7px;cursor:pointer;
+}
+button.ghost:hover{border-color:#cdd2d9;color:var(--ink)}
+
+/* ===== 库存 ===== */
+.inv-slot{border-top:1px dashed var(--line);padding:10px 0 4px}
+.inv-slot:first-of-type{border-top:0;padding-top:0}
+.inv-slot h3{margin:0 0 6px;font-size:12.5px;font-weight:600;color:#3a424e}
+.inv-slot h3 span{font-weight:400;color:var(--muted);margin-left:6px;font-size:11.5px}
+.inv-none{font-size:12px;color:#a8aeb8;padding:2px 0 6px}
+.inv-item{display:flex;align-items:center;gap:8px;padding:4px 0}
+.idx{font-size:11px;color:var(--muted);min-width:22px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.chip{
+  font-size:11.5px;padding:2px 7px;border-radius:6px;border:1px solid transparent;
+  white-space:nowrap;line-height:1.5;
+}
+.chip.core{background:#e7f2f0;color:#0b5c53;border-color:#cfe6e2}
+.chip.class{background:#fdf1de;color:#8a5a12;border-color:#efdcc0}
+.chip.crit{background:#fde9e6;color:#a02c22;border-color:#f0cfc9}
+.chip.other{background:#eef0f3;color:#79818d;border-color:#e2e6ea}
+.chip.dim{opacity:.42;text-decoration:line-through}
+.chip.bad{background:#fdf0ef;color:#a5342a;border-color:#efcfcb}
+button.del{
+  border:0;background:transparent;color:#b6bcc5;font-size:15px;line-height:1;cursor:pointer;
+  padding:4px 6px;border-radius:5px;font-family:inherit;
+}
+button.del:hover{background:#fdeeec;color:var(--bad)}
+.inv-tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* ===== 结果 ===== */
+.result .status{font-size:13px;color:var(--muted);margin-bottom:4px}
+.result .status b{font-size:17px;color:var(--ink);font-weight:600;letter-spacing:.3px}
+.result .status b.ok{color:var(--ok)}
+.nav{display:flex;align-items:center;gap:8px;margin:10px 0 14px;flex-wrap:wrap}
+.nav .label{font-size:12px;color:var(--muted)}
+.sol{display:flex;flex-direction:column;gap:6px}
+.sol-row{
+  display:grid;grid-template-columns:58px 54px minmax(0,1fr);gap:8px;align-items:center;
+  border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:#fbfbfc;
+}
+.sol-row .slot{font-size:12.5px;font-weight:600;color:#3a424e}
+.sol-row .tagno{font-size:11px;color:var(--muted)}
+.need{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.need .h{font-size:12px;color:var(--muted);margin-bottom:6px}
+.empty{font-size:12.5px;color:var(--muted);line-height:1.7}
+.note{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.75}
+.note b{color:#3a424e;font-weight:600}
+.kbd{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;background:#f1f3f5;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+
+/* ===== 页签 / 自定义词条 ===== */
+.tabs{display:flex;gap:3px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px}
+.tab{
+  border:0;background:transparent;font-family:inherit;font-size:12.5px;color:var(--muted);
+  padding:7px 15px;border-radius:8px;cursor:pointer;white-space:nowrap;
+}
+.tab:hover{color:var(--ink)}
+.tab[data-active="1"]{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.head-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.head-right .mode-btn{padding:5px 9px;font-size:11.5px}
+.cust-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media (max-width:760px){.cust-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.cust-cell{
+  border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:#fbfbfc;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;
+}
+.cust-cell[data-on="1"]{background:#f0f8f2;border-color:#c7e2ce}
+.cust-cell .cname{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stepper{display:flex;align-items:center;gap:3px;flex:0 0 auto}
+.stepper button{
+  width:25px;height:25px;border:1px solid var(--line);background:#fff;border-radius:6px;
+  color:var(--muted);font-family:inherit;font-size:14px;line-height:1;cursor:pointer;padding:0;
+}
+.stepper button:hover{border-color:var(--accent);color:var(--accent-ink)}
+.stepper .v{min-width:20px;text-align:center;font-size:14px;font-weight:600}
+button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
+.pill[data-state="over"]{background:#fdf0ef;border-color:#e8c3bf;color:var(--bad)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="bar">
+    <div>
+      <h1>3L 套装求解器<small>每个部位选 1 件，凑满目标词条</small></h1>
+      <p id="leadNote">默认目标：Dimensional Leap ×3、White Hole ×3、Registry ×3、ATK ×3、Bowman ×3、Crit DMG ×3</p>
+    </div>
+    <div class="tabs" id="pageTabs"></div>
+  </div>
+
+  <div id="viewSolve">
+  <!-- ===== 目标 ===== -->
+  <section class="card">
+    <div class="card-head">
+      <h2>目标词条<span id="targetSub"></span></h2>
+      <div class="head-right">
+        <div class="mode-switch" id="modeSwitch"></div>
+        <span class="pill" id="targetPill" data-state="zero">—</span>
+      </div>
+    </div>
+    <div class="target-grid" id="targetGrid"></div>
+    <div class="mode-note" id="modeNote"></div>
+  </section>
+
+  <div class="cols">
+    <div class="col">
+      <!-- ===== 添加装备 ===== -->
+      <section class="card">
+        <div class="card-head"><h2>加一件装备</h2><span class="pill" id="pickPill" data-state="zero">0 / 3 条</span></div>
+        <div class="slot-tabs" id="slotTabs"></div>
+        <div class="tag-grid" id="tagGrid"></div>
+        <div class="preview" id="preview"></div>
+        <button class="primary" id="addBtn">加入库存</button>
+      </section>
+
+      <!-- ===== 库存 ===== -->
+      <section class="card">
+        <div class="card-head">
+          <h2>我的装备<span id="invSub"></span></h2>
+          <span class="pill" id="invPill">0 件</span>
+        </div>
+        <div id="invList"></div>
+        <div class="inv-tools">
+          <button class="ghost" id="btnDemo">载入示例</button>
+          <button class="ghost" id="btnExport">导出 JSON</button>
+          <button class="ghost" id="btnImport">导入 JSON</button>
+          <button class="ghost" id="btnClear">清空</button>
+          <input type="file" id="fileInput" accept="application/json,.json" hidden>
+        </div>
+      </section>
+    </div>
+
+    <div class="col">
+      <!-- ===== 最优一套 ===== -->
+      <section class="card result">
+        <div class="card-head"><h2>最优一套</h2><span class="pill" id="resultPill" data-state="zero">—</span></div>
+        <div id="resultBody"></div>
+        <div class="need" id="needBox" hidden>
+          <div class="h">还差的词条</div>
+          <div class="chips" id="needChips"></div>
+        </div>
+      </section>
+
+      <!-- ===== 可用性检查 ===== -->
+      <section class="card">
+        <div class="card-head">
+          <h2>可用性检查<span id="useSub"></span></h2>
+          <span class="pill" id="usePill" data-state="zero">—</span>
+        </div>
+        <div id="useBody"></div>
+      </section>
+
+      <p class="note">
+        <b>求解规则</b>：6 个部位（帽子 / 上衣 / 裤子 / 披风 / 手套 / 鞋子）各取 1 件，每件 3 条互不相同的词条，合计 18 条；
+        四类通用词条（Dimensional Leap、White Hole、Registry、ATK）各 3 条不变。<br>
+        <b>与原站的差异</b>：原版要求「Mage / Pirate / Thief / Warrior / Bowman 各 1 条 + Crit DMG 1 条」共 6 条职业与暴伤词条，
+        本版把这 6 条改为「Bowman ×3 + Crit DMG ×3」，总数仍是 18 条。<br>
+        <b>算法</b>：按部位顺序做记忆化动态规划求最优，枚举时用目标上限剪枝，因此能给出「可行方案总数」；
+        18 条凑不齐时，给出最接近的方案与缺口，而不是直接报无解。
+      </p>
+    </div>
+  </div>
+  </div>
+
+  <!-- ===== 视图：自定义毕业词条 ===== -->
+  <div id="viewCustom" hidden>
+    <section class="card">
+      <div class="card-head">
+        <h2>自定义毕业词条<span id="custSub"></span></h2>
+        <span class="pill" id="custPill" data-state="zero">0 / 18 条</span>
+      </div>
+      <div class="cust-grid" id="custGrid"></div>
+      <p class="mode-note" id="custNote"></p>
+      <div class="inv-tools">
+        <button class="primary cust-apply" id="btnApply">用这套目标求解</button>
+        <button class="ghost" id="btnPresetBow">套用 Bowman 版</button>
+        <button class="ghost" id="btnPresetClassic">套用经典版</button>
+        <button class="ghost" id="btnPresetZero">全部清零</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>这套目标预览<span id="prevSub"></span></h2>
+        <span class="pill" id="prevPill" data-state="zero">—</span>
+      </div>
+      <div class="target-grid" id="custPrev"></div>
+      <div class="mode-note" id="custDiff"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>填写规则</h2><span class="pill">上限 6</span></div>
+      <p class="note" style="margin-top:0">
+        <b>怎么填</b>：每个词条填「要凑到几条」，0 就是不作要求。6 个部位各上 1 件、每件 3 条，全场一共只有 18 条，
+        所以合计超过 18 条不可能全部达成，页面会先提示你减回去。<br>
+        <b>合计正好 18 条</b>：等于要求每一条都不能浪费，求出来的搭配里每一件都是满分词条。<br>
+        <b>合计少于 18 条</b>：允许出现空转词条，求解器仍然优先把目标条数凑齐，剩下的位置可以放任意词条。<br>
+        <b>单条上限 6</b>：同一件装备的 3 条必须互不相同，所以同一条词条一件最多 1 次，6 件最多 6 次。<br>
+        填好后点「用这套目标求解」，回到求解器页按这套目标挑选装备；这套设置会和库存一起保存在本地。
+      </p>
+    </section>
+  </div>
+
+</div>
+
+<script>
+/* ===== 常量 ===== */
+const SLOTS = [
+  { key:'hat',    label:'帽子' },
+  { key:'top',    label:'上衣' },
+  { key:'bottom', label:'裤子' },
+  { key:'cape',   label:'披风' },
+  { key:'glove',  label:'手套' },
+  { key:'shoe',   label:'鞋子' }
+];
+
+const TAGS = [
+  { k:'DL',      name:'Dimensional Leap', group:'core' },
+  { k:'WH',      name:'White Hole',       group:'core' },
+  { k:'REG',     name:'Registry',         group:'core' },
+  { k:'ATK',     name:'ATK',              group:'core' },
+  { k:'BOW',     name:'Bowman',           group:'class' },
+  { k:'CD',      name:'Crit DMG',         group:'crit' },
+  { k:'MAGE',    name:'Mage',             group:'class' },
+  { k:'PIRATE',  name:'Pirate',           group:'class' },
+  { k:'THIEF',   name:'Thief',            group:'class' },
+  { k:'WARRIOR', name:'Warrior',          group:'class' },
+  { k:'OTHER',   name:'Other',            group:'other' }
+];
+const TAGMAP = {};
+TAGS.forEach(t => { TAGMAP[t.k] = t; });
+
+const MODES = {
+  bowman: {
+    label:'Bowman x3 + Crit DMG x3',
+    targets:{ DL:3, WH:3, REG:3, ATK:3, BOW:3, CD:3 },
+    note:'当前：通用四类各 3 条 + Bowman 3 条 + Crit DMG 3 条，正好 18 条。Mage / Pirate / Thief / Warrior 不再计入目标。'
+  },
+  classic: {
+    label:'经典：5 职业各 1 + Crit DMG 1',
+    targets:{ DL:3, WH:3, REG:3, ATK:3, MAGE:1, PIRATE:1, THIEF:1, WARRIOR:1, BOW:1, CD:1 },
+    note:'原站目标：通用四类各 3 条 + 5 个职业各 1 条 + Crit DMG 1 条，也是 18 条。'
+  },
+  custom: {
+    label:'自定义',
+    targets:null,
+    note:''
+  }
+};
+
+/* ===== 目标选择 ===== */
+function activeTargets() {
+  if (state.mode !== 'custom') return MODES[state.mode].targets;
+  const out = {};
+  TAGS.forEach(t => {
+    const n = Math.round(Number(state.custom && state.custom[t.k]) || 0);
+    if (n > 0) out[t.k] = Math.min(6, n);
+  });
+  return out;
+}
+function customTotal() {
+  let sum = 0;
+  TAGS.forEach(t => { sum += Math.max(0, Math.min(6, Math.round(Number(state.custom[t.k]) || 0))); });
+  return sum;
+}
+function targetSummary(targets) {
+  const keys = Object.keys(targets);
+  if (!keys.length) return '未设置';
+  return keys.map(k => TAGMAP[k].name + ' ×' + targets[k]).join('、');
+}
+
+/* ===== 求解核心 ===== */
+function solveSet(slotPieces, targets, comboLimit) {
+  const keys = Object.keys(targets);
+  const tgt = keys.map(k => targets[k]);
+  const idx = {};
+  keys.forEach((k, i) => { idx[k] = i; });
+  const empty = tgt.map(() => 0);
+  const totalTarget = tgt.reduce((a, b) => a + b, 0);
+
+  function apply(counts, piece) {
+    const c = counts.slice();
+    let gain = 0;
+    for (let n = 0; n < piece.lines.length; n++) {
+      const j = idx[piece.lines[n]];
+      if (j === undefined) continue;
+      if (c[j] < tgt[j]) { c[j] += 1; gain += 1; }
+    }
+    return [c, gain];
+  }
+
+  const memo = new Map();
+  function best(i, counts) {
+    if (i === slotPieces.length) return { score:0, ways:1 };
+    const key = i + '|' + counts.join(',');
+    const hit = memo.get(key);
+    if (hit) return hit;
+    let bs = -Infinity, bw = 0;
+    for (let p = 0; p < slotPieces[i].length; p++) {
+      const [c2, g] = apply(counts, slotPieces[i][p]);
+      const r = best(i + 1, c2);
+      if (r.ways === 0) continue;
+      const tot = g + r.score;
+      if (tot > bs) { bs = tot; bw = r.ways; }
+      else if (tot === bs) { bw += r.ways; }
+    }
+    const res = (bw === 0) ? { score:0, ways:0 } : { score:bs, ways:bw };
+    memo.set(key, res);
+    return res;
+  }
+
+  const root = best(0, empty);
+  const maxScore = root.score;
+  const ways = root.ways;
+  const emptySlots = slotPieces
+    .map((list, i) => (list.length ? null : SLOTS[i].label))
+    .filter(Boolean);
+
+  const combos = [];
+  if (ways > 0 && comboLimit > 0) {
+    const path = [];
+    (function walk(i, counts, remain) {
+      if (combos.length >= comboLimit) return;
+      if (i === slotPieces.length) { combos.push(path.slice()); return; }
+      for (let p = 0; p < slotPieces[i].length; p++) {
+        const [c2, g] = apply(counts, slotPieces[i][p]);
+        const r = best(i + 1, c2);
+        if (r.ways === 0 || g + r.score !== remain) continue;
+        path.push({ slot:i, pieceIndex:p, piece:slotPieces[i][p], gain:g });
+        walk(i + 1, c2, remain - g);
+        path.pop();
+        if (combos.length >= comboLimit) return;
+      }
+    })(0, empty, maxScore);
+  }
+
+  function rawCounts(combo) {
+    const c = {};
+    keys.forEach(k => { c[k] = 0; });
+    combo.forEach(step => {
+      step.piece.lines.forEach(l => { if (c[l] !== undefined) c[l] += 1; });
+    });
+    return c;
+  }
+
+  return {
+    keys, targets:targets, tgt, totalTarget,
+    maxScore, ways, combos, emptySlots, rawCounts
+  };
+}
+
+/* ===== 状态 ===== */
+const STORE_KEY = 'ms-3l-solver-v2';
+const state = {
+  mode:'bowman',
+  page:'solve',
+  custom:{ DL:3, WH:3, REG:3, ATK:3, BOW:3, CD:3 },
+  inv:null,
+  demo:false,
+  pick:{ slot:'hat', lines:[] },
+  solIndex:0
+};
+let LAST = null;
+
+function emptyInv() {
+  const o = {};
+  SLOTS.forEach(s => { o[s.key] = []; });
+  return o;
+}
+function P(a, b, c) { return { lines:[a, b, c] }; }
+
+function demoInv() {
+  return {
+    hat:    [P('DL','WH','ATK'),  P('DL','ATK','MAGE')],
+    top:    [P('DL','REG','BOW'), P('WH','MAGE','CD'), P('DL','REG','BOW')],
+    bottom: [P('WH','CD','BOW'),  P('DL','CD','WARRIOR')],
+    cape:   [P('REG','ATK','CD'), P('THIEF','PIRATE','WH')],
+    glove:  [P('DL','WH','REG'),  P('ATK','REG','OTHER')],
+    shoe:   [P('ATK','BOW','CD'), P('BOW','CD','DL')]
+  };
+}
+
+function normalizeInv(obj) {
+  const out = emptyInv();
+  SLOTS.forEach(s => {
+    const list = (obj && Array.isArray(obj[s.key])) ? obj[s.key] : [];
+    out[s.key] = list
+      .map(p => ({ lines:(Array.isArray(p && p.lines) ? p.lines : []).filter(k => TAGMAP[k]).slice(0, 3) }))
+      .filter(p => p.lines.length > 0);
+  });
+  return out;
+}
+
+/* ===== DOM 小工具 ===== */
+const $ = s => document.querySelector(s);
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+function chipNode(k, dim) {
+  const t = TAGMAP[k];
+  const c = el('span', 'chip ' + t.group + (dim ? ' dim' : ''), t.name);
+  c.dataset.tag = k;
+  return c;
+}
+
+/* ===== 存档 ===== */
+function save() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      mode:state.mode, page:state.page, custom:state.custom, inv:state.inv, demo:state.demo
+    }));
+  } catch (e) { /* file:// 下若被禁用就忽略 */ }
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (!d || !d.inv) return false;
+    state.inv = normalizeInv(d.inv);
+    state.mode = (d.mode === 'classic' || d.mode === 'custom') ? d.mode : 'bowman';
+    state.page = (d.page === 'custom') ? 'custom' : 'solve';
+    if (d.custom) {
+      const z = {};
+      TAGS.forEach(t => {
+        z[t.k] = Math.max(0, Math.min(6, Math.round(Number(d.custom[t.k]) || 0)));
+      });
+      state.custom = z;
+    }
+    state.demo = !!d.demo;
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ===== 渲染：页签 ===== */
+function renderPage() {
+  const box = $('#pageTabs');
+  box.innerHTML = '';
+  const pages = [
+    { k:'solve',  label:'求解器' },
+    { k:'custom', label:'毕业词条' }
+  ];
+  pages.forEach(p => {
+    const btn = el('button', 'tab', p.label);
+    btn.dataset.active = (state.page === p.k) ? '1' : '0';
+    btn.onclick = () => {
+      if (state.page === p.k) return;
+      state.page = p.k;
+      renderAll();
+    };
+    box.appendChild(btn);
+  });
+  $('#viewSolve').hidden = (state.page !== 'solve');
+  $('#viewCustom').hidden = (state.page !== 'custom');
+}
+
+/* ===== 渲染：模式 ===== */
+function renderMode() {
+  const box = $('#modeSwitch');
+  box.innerHTML = '';
+  ['bowman', 'classic', 'custom'].forEach(k => {
+    const label = (k === 'custom') ? ('自定义（' + customTotal() + ' 条）') : MODES[k].label;
+    const btn = el('button', 'mode-btn', label);
+    btn.dataset.active = (state.mode === k) ? '1' : '0';
+    btn.onclick = () => {
+      if (state.mode === k) {
+        if (k === 'custom') { state.page = 'custom'; renderAll(); }
+        return;
+      }
+      if (k === 'custom' && customTotal() === 0) {
+        state.page = 'custom';
+        renderAll();
+        return;
+      }
+      state.mode = k;
+      state.solIndex = 0;
+      renderAll();
+    };
+    box.appendChild(btn);
+  });
+}
+
+/* ===== 渲染：目标 ===== */
+function renderTargets() {
+  const box = $('#targetGrid');
+  box.innerHTML = '';
+  const targets = activeTargets();
+  const keys = Object.keys(targets);
+  const pill = $('#targetPill');
+
+  if (!keys.length) {
+    $('#targetSub').textContent = '';
+    pill.textContent = '未设置';
+    pill.dataset.state = 'zero';
+    $('#modeNote').textContent = '还没有设置目标词条：去右上角「毕业词条」页填一套，或在上面切回 Bowman / 经典预设。';
+    $('#leadNote').textContent = '当前目标：未设置';
+    return;
+  }
+
+  const combo = (LAST && LAST.combos.length) ? LAST.combos[Math.min(state.solIndex, LAST.combos.length - 1)] : null;
+  const counts = combo ? LAST.rawCounts(combo) : {};
+
+  keys.forEach(k => {
+    const need = targets[k];
+    const got = counts[k] || 0;
+    const item = el('div', 'target');
+    item.dataset.state = got >= need ? 'ok' : (got > 0 ? 'part' : 'zero');
+    item.appendChild(el('span', 'tname', TAGMAP[k].name));
+    const val = el('span', 'tval', String(got));
+    val.appendChild(el('em', null, '/ ' + need));
+    item.appendChild(val);
+    box.appendChild(item);
+  });
+
+  const totalTarget = keys.reduce((a, k) => a + targets[k], 0);
+  const score = LAST ? LAST.maxScore : 0;
+  pill.textContent = (score >= totalTarget) ? ('完成 ' + totalTarget + ' / ' + totalTarget + ' 条') : (score + ' / ' + totalTarget + ' 条');
+  pill.dataset.state = (score >= totalTarget) ? 'ok' : (score > 0 ? 'part' : 'zero');
+  $('#targetSub').textContent = '共 ' + totalTarget + ' 条';
+
+  if (state.mode === 'custom') {
+    $('#modeNote').textContent = '自定义目标：' + targetSummary(targets) + '，合计 ' + totalTarget + ' 条。'
+      + (totalTarget > 18 ? '已超过 18 条上限，实际凑不满。' : '');
+  } else {
+    $('#modeNote').textContent = MODES[state.mode].note;
+  }
+  $('#leadNote').textContent = '当前目标：' + targetSummary(targets);
+}
+
+/* ===== 渲染：自定义毕业词条页 ===== */
+function renderCustom() {
+  const box = $('#custGrid');
+  box.innerHTML = '';
+  TAGS.forEach(t => {
+    const v = Math.max(0, Math.min(6, Math.round(Number(state.custom[t.k]) || 0)));
+    const cell = el('div', 'cust-cell');
+    cell.dataset.on = (v > 0) ? '1' : '0';
+    cell.appendChild(el('span', 'cname', t.name));
+    const st = el('div', 'stepper');
+    const minus = el('button', null, '\u2212');
+    minus.title = '减 1';
+    minus.onclick = () => setCustom(t.k, v - 1);
+    const val = el('span', 'v', String(v));
+    const plus = el('button', null, '+');
+    plus.title = '加 1';
+    plus.onclick = () => setCustom(t.k, v + 1);
+    st.appendChild(minus);
+    st.appendChild(val);
+    st.appendChild(plus);
+    cell.appendChild(st);
+    box.appendChild(cell);
+  });
+
+  const total = customTotal();
+  const pill = $('#custPill');
+  pill.textContent = total + ' / 18 条';
+  pill.dataset.state = (total > 18) ? 'over' : (total === 0 ? 'zero' : (total === 18 ? 'ok' : 'part'));
+  $('#custSub').textContent = (state.mode === 'custom') ? '· 当前生效' : '';
+
+  let note = '';
+  if (total === 0) {
+    note = '还没填任何要求：全部为 0 时求解器没有目标可凑。';
+  } else if (total > 18) {
+    note = '合计 ' + total + ' 条，超过 6 件 × 3 条 = 18 条的上限，不可能全部达成，请先减到 18 以内。';
+  } else if (total === 18) {
+    note = '合计 18 条：要求每一条词条都落在目标上，求出来的搭配里件件都是满分件。';
+  } else {
+    note = '合计 ' + total + ' 条：还有 ' + (18 - total) + ' 条可以放空转词条，求解器仍会优先把目标全部凑齐。';
+  }
+  $('#custNote').textContent = note;
+  renderCustomPrev();
+}
+
+function renderCustomPrev() {
+  const box = $('#custPrev');
+  box.innerHTML = '';
+  const cur = {};
+  TAGS.forEach(t => {
+    const n = Math.max(0, Math.min(6, Math.round(Number(state.custom[t.k]) || 0)));
+    if (n > 0) cur[t.k] = n;
+  });
+  const keys = Object.keys(cur);
+  const total = keys.reduce((a, k) => a + cur[k], 0);
+  const pill = $('#prevPill');
+
+  if (!keys.length) {
+    pill.textContent = '空';
+    pill.dataset.state = 'zero';
+    $('#prevSub').textContent = '';
+    $('#custDiff').textContent = '还没有设置任何目标词条，这套目标在求解器里会直接显示「未设置」。';
+    return;
+  }
+
+  keys.forEach(k => {
+    const item = el('div', 'target');
+    item.dataset.state = (total > 18) ? 'over' : 'ok';
+    item.appendChild(el('span', 'tname', TAGMAP[k].name));
+    item.appendChild(el('span', 'tval', '\u00d7' + cur[k]));
+    box.appendChild(item);
+  });
+
+  pill.textContent = total + ' 条';
+  pill.dataset.state = (total > 18) ? 'over' : 'ok';
+  $('#prevSub').textContent = '· ' + keys.length + ' 类词条';
+
+  const bow = MODES.bowman.targets;
+  const diff = [];
+  TAGS.forEach(t => {
+    const a = bow[t.k] || 0;
+    const b = cur[t.k] || 0;
+    if (a !== b) diff.push(t.name + ' ' + a + '\u2192' + b);
+  });
+  $('#custDiff').textContent = diff.length
+    ? ('与「Bowman ×3 + Crit DMG ×3」预设的差异：' + diff.join('；') + '。')
+    : '与「Bowman ×3 + Crit DMG ×3」预设完全一致（合计 18 条）。';
+}
+
+function setCustom(k, v) {
+  state.custom[k] = Math.max(0, Math.min(6, Math.round(v) || 0));
+  state.solIndex = 0;
+  renderAll();
+}
+
+function presetCustom(obj) {
+  const z = {};
+  TAGS.forEach(t => { z[t.k] = 0; });
+  Object.keys(obj || {}).forEach(k => {
+    if (TAGMAP[k]) z[k] = Math.max(0, Math.min(6, Math.round(obj[k]) || 0));
+  });
+  state.custom = z;
+  state.solIndex = 0;
+  renderAll();
+}
+
+function applyCustom() {
+  if (customTotal() === 0) {
+    $('#custNote').textContent = '还没填任何要求，先把要凑的词条条数调到 1 以上。';
+    return;
+  }
+  state.mode = 'custom';
+  state.page = 'solve';
+  state.solIndex = 0;
+  renderAll();
+}
+
+/* ===== 渲染：添加区 ===== */
+function renderSlotTabs() {
+  const box = $('#slotTabs');
+  box.innerHTML = '';
+  SLOTS.forEach(s => {
+    const btn = el('button', 'slot-tab', s.label);
+    btn.dataset.active = (state.pick.slot === s.key) ? '1' : '0';
+    const cnt = el('span', 'cnt', String(state.inv[s.key].length));
+    btn.appendChild(cnt);
+    btn.onclick = () => { state.pick.slot = s.key; renderSlotTabs(); };
+    box.appendChild(btn);
+  });
+}
+
+function renderTagGrid() {
+  const box = $('#tagGrid');
+  box.innerHTML = '';
+  TAGS.forEach(t => {
+    const at = state.pick.lines.indexOf(t.k);
+    const btn = el('button', 'tbtn', t.name);
+    btn.dataset.group = t.group;
+    btn.dataset.selected = (at >= 0) ? '1' : '0';
+    if (at >= 0) btn.dataset.order = String(at + 1);
+    btn.onclick = () => toggleTag(t.k);
+    box.appendChild(btn);
+  });
+}
+
+function renderPreview() {
+  const box = $('#preview');
+  box.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const k = state.pick.lines[i];
+    const cell = el('div', 'pline');
+    cell.dataset.empty = k ? '0' : '1';
+    cell.appendChild(el('span', 'ph', 'line ' + (i + 1)));
+    cell.appendChild(el('span', 'pv', k ? TAGMAP[k].name : '未选'));
+    box.appendChild(cell);
+  }
+  const n = state.pick.lines.length;
+  $('#addBtn').disabled = (n !== 3);
+  const pill = $('#pickPill');
+  pill.textContent = n + ' / 3 条';
+  pill.dataset.state = (n === 3) ? 'ok' : (n > 0 ? 'part' : 'zero');
+}
+
+function toggleTag(k) {
+  const lines = state.pick.lines;
+  const at = lines.indexOf(k);
+  if (at >= 0) lines.splice(at, 1);
+  else if (lines.length < 3) lines.push(k);
+  renderTagGrid();
+  renderPreview();
+}
+
+function addPiece() {
+  if (state.pick.lines.length !== 3) return;
+  state.inv[state.pick.slot].push({ lines:state.pick.lines.slice() });
+  state.pick.lines = [];
+  state.demo = false;
+  state.solIndex = 0;
+  renderAll();
+}
+
+/* ===== 渲染：库存 ===== */
+function renderInventory() {
+  const box = $('#invList');
+  box.innerHTML = '';
+  let total = 0;
+  SLOTS.forEach(s => {
+    const list = state.inv[s.key];
+    total += list.length;
+    const wrap = el('div', 'inv-slot');
+    const h = el('h3', null, s.label);
+    h.appendChild(el('span', null, list.length + ' 件'));
+    wrap.appendChild(h);
+    if (!list.length) {
+      wrap.appendChild(el('div', 'inv-none', '还没有'));
+    } else {
+      list.forEach((p, i) => {
+        const row = el('div', 'inv-item');
+        row.appendChild(el('span', 'idx', '#' + (i + 1)));
+        const chips = el('div', 'chips');
+        p.lines.forEach(k => chips.appendChild(chipNode(k, false)));
+        row.appendChild(chips);
+        const del = el('button', 'del', '\u00d7');
+        del.title = '删除';
+        del.onclick = () => {
+          state.inv[s.key].splice(i, 1);
+          state.demo = false;
+          state.solIndex = 0;
+          renderAll();
+        };
+        row.appendChild(del);
+        wrap.appendChild(row);
+      });
+    }
+    box.appendChild(wrap);
+  });
+  $('#invPill').textContent = total + ' 件';
+  $('#invSub').textContent = state.demo ? '示例数据' : '';
+}
+
+/* ===== 渲染：结果 ===== */
+function renderResult() {
+  const body = $('#resultBody');
+  const needBox = $('#needBox');
+  const needChips = $('#needChips');
+  const pill = $('#resultPill');
+  body.innerHTML = '';
+  needBox.hidden = true;
+  needChips.innerHTML = '';
+
+  if (!LAST || LAST.ways === 0) {
+    pill.textContent = LAST ? '待补齐' : '未设置';
+    pill.dataset.state = 'zero';
+    const p = el('p', 'empty');
+    if (!LAST) {
+      p.textContent = '还没有设置目标词条：去右上角「毕业词条」页填一套，或在目标卡里切回 Bowman / 经典预设。';
+    } else if (!LAST.emptySlots.length) {
+      p.textContent = '暂时没有可行搭配。';
+    } else {
+      p.textContent = '这些部位还没有装备：' + LAST.emptySlots.join('、') + '。每个部位都需要至少 1 件，求解才能开始。';
+    }
+    body.appendChild(p);
+    return;
+  }
+
+  const combo = LAST.combos[Math.min(state.solIndex, LAST.combos.length - 1)];
+  const counts = LAST.rawCounts(combo);
+  const complete = LAST.maxScore >= LAST.totalTarget;
+
+  const status = el('div', 'status');
+  const big = el('b', complete ? 'ok' : '', LAST.maxScore + ' / ' + LAST.totalTarget + ' 条');
+  status.appendChild(big);
+  status.appendChild(document.createTextNode(complete ? ' · 目标全部达成' : ' · 已拿下的目标条数'));
+  body.appendChild(status);
+
+  const sub = el('div', 'status');
+  sub.appendChild(document.createTextNode(
+    complete
+      ? ('可行方案共 ' + LAST.ways + ' 套' + (LAST.ways > 1 ? '，用下方按钮切换查看。' : '。'))
+      : ('共 ' + LAST.ways + ' 套同等最优的搭配。')
+  ));
+  body.appendChild(sub);
+
+  pill.textContent = complete ? '完成' : '最优';
+  pill.dataset.state = complete ? 'ok' : 'part';
+
+  if (LAST.ways > 1) {
+    const nav = el('div', 'nav');
+    const prev = el('button', 'ghost', '\u2190 上一套');
+    const next = el('button', 'ghost', '下一套 \u2192');
+    const label = el('span', 'label', '方案 ' + (Math.min(state.solIndex, LAST.combos.length - 1) + 1) + ' / ' + LAST.ways);
+    prev.disabled = false;
+    prev.onclick = () => {
+      state.solIndex = (state.solIndex - 1 + LAST.combos.length) % LAST.combos.length;
+      renderAll();
+    };
+    next.onclick = () => {
+      state.solIndex = (state.solIndex + 1) % LAST.combos.length;
+      renderAll();
+    };
+    nav.appendChild(prev); nav.appendChild(label); nav.appendChild(next);
+    body.appendChild(nav);
+  }
+
+  /* 逐件展示，标出哪条真正计入目标 */
+  const running = {};
+  LAST.keys.forEach(k => { running[k] = 0; });
+  const sol = el('div', 'sol');
+  combo.forEach(step => {
+    const row = el('div', 'sol-row');
+    row.appendChild(el('div', 'slot', SLOTS[step.slot].label));
+    row.appendChild(el('div', 'tagno', '#' + (step.pieceIndex + 1)));
+    const chips = el('div', 'chips');
+    step.piece.lines.forEach(k => {
+      let counted = false;
+      if (LAST.targets[k] !== undefined && running[k] < LAST.targets[k]) {
+        running[k] += 1;
+        counted = true;
+      }
+      chips.appendChild(chipNode(k, !counted));
+    });
+    row.appendChild(chips);
+    sol.appendChild(row);
+  });
+  body.appendChild(sol);
+
+  /* 缺口 */
+  const gaps = [];
+  LAST.keys.forEach(k => {
+    const got = counts[k] || 0;
+    const need = LAST.targets[k];
+    if (got < need) gaps.push({ k: k, miss: need - got });
+  });
+  if (gaps.length) {
+    needBox.hidden = false;
+    gaps.forEach(g => {
+      const c = chipNode(g.k, false);
+      c.textContent = TAGMAP[g.k].name + ' \u00d7' + g.miss;
+      c.dataset.tag = g.k;
+      needChips.appendChild(c);
+    });
+  }
+}
+
+/* ===== 渲染：可用性检查 ===== */
+function renderUsability() {
+  const body = $('#useBody');
+  const pill = $('#usePill');
+  body.innerHTML = '';
+
+  const targets = activeTargets();
+  const keys = Object.keys(targets);
+  if (!keys.length) {
+    $('#useSub').textContent = '';
+    pill.textContent = '未设置';
+    pill.dataset.state = 'zero';
+    body.appendChild(el('p', 'empty', '先设置目标词条，这里才能判断每件装备能不能用。'));
+    return;
+  }
+  const totalTarget = keys.reduce((a, k) => a + targets[k], 0);
+  const strict = (totalTarget === 18);
+
+  const good = [];
+  const bad = [];
+  SLOTS.forEach(s => {
+    state.inv[s.key].forEach((p, i) => {
+      const off = p.lines.filter(k => targets[k] === undefined);
+      const item = { slot:s, idx:i + 1, piece:p, off:off };
+      if (off.length === 0) good.push(item);
+      else bad.push(item);
+    });
+  });
+
+  const total = good.length + bad.length;
+  $('#useSub').textContent = total ? ('共 ' + total + ' 件') : '';
+  pill.textContent = total
+    ? (good.length + (strict ? ' 件可进满 18 条' : ' 件全命中目标'))
+    : '暂无装备';
+  pill.dataset.state = total ? (bad.length ? 'part' : 'ok') : 'zero';
+
+  if (!total) {
+    body.appendChild(el('p', 'empty', '库存为空，先在左侧加件，或点「载入示例」看一套现成数据。'));
+    return;
+  }
+  if (!bad.length) {
+    body.appendChild(el('p', 'empty',
+      '全部 ' + total + ' 件的 3 条词条都在目标内，任何一件都能参与方案。'));
+    return;
+  }
+
+  body.appendChild(el('p', 'empty', strict
+    ? ('下面 ' + bad.length + ' 件带目标外词条。因为每个部位只能上 1 件、且 18 条要一条不浪费，'
+       + '这些件进不了满 18 条的方案（标红的就是用不上的词条）：')
+    : ('下面 ' + bad.length + ' 件含目标外词条。当前目标合计 ' + totalTarget + ' 条（未满 18），允许出现空位，'
+       + '这些件仍可上场，只是目标外那几条会空转：')));
+
+  const list = el('div', 'sol');
+  bad.forEach(item => {
+    const row = el('div', 'sol-row');
+    row.appendChild(el('div', 'slot', item.slot.label));
+    row.appendChild(el('div', 'tagno', '#' + item.idx));
+    const chips = el('div', 'chips');
+    item.piece.lines.forEach(k => {
+      const isOff = item.off.indexOf(k) >= 0;
+      const cls = isOff ? (strict ? 'bad' : TAGMAP[k].group + ' dim') : TAGMAP[k].group;
+      chips.appendChild(el('span', 'chip ' + cls, TAGMAP[k].name));
+    });
+    row.appendChild(chips);
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
+/* ===== 主渲染 ===== */
+function renderAll() {
+  const pieces = SLOTS.map(s => state.inv[s.key] || []);
+  const targets = activeTargets();
+  LAST = Object.keys(targets).length ? solveSet(pieces, targets, 40) : null;
+  if (!LAST || !LAST.combos.length) state.solIndex = 0;
+  else if (state.solIndex >= LAST.combos.length) state.solIndex = 0;
+  renderPage();
+  renderMode();
+  renderTargets();
+  renderSlotTabs();
+  renderTagGrid();
+  renderPreview();
+  renderInventory();
+  renderResult();
+  renderUsability();
+  renderCustom();
+  save();
+}
+
+/* ===== 工具按钮 ===== */
+function loadDemo() {
+  state.inv = normalizeInv(demoInv());
+  state.demo = true;
+  state.solIndex = 0;
+  renderAll();
+}
+function clearInv() {
+  state.inv = emptyInv();
+  state.demo = false;
+  state.solIndex = 0;
+  renderAll();
+}
+function exportJson() {
+  const data = JSON.stringify({ version:3, mode:state.mode, custom:state.custom, inv:state.inv }, null, 2);
+  const blob = new Blob([data], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '3L装备库存.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+function importJson(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const d = JSON.parse(String(reader.result));
+      const inv = normalizeInv(d && d.inv ? d.inv : d);
+      state.inv = inv;
+      state.demo = false;
+      state.mode = (d && (d.mode === 'classic' || d.mode === 'custom')) ? d.mode : 'bowman';
+      if (d && d.custom) {
+        const z = {};
+        TAGS.forEach(t => {
+          z[t.k] = Math.max(0, Math.min(6, Math.round(Number(d.custom[t.k]) || 0)));
+        });
+        state.custom = z;
+      }
+      state.solIndex = 0;
+      renderAll();
+    } catch (e) {
+      alert('读取失败：文件不是有效的库存 JSON。');
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+/* ===== 启动 ===== */
+function boot() {
+  if (!load()) {
+    state.inv = normalizeInv(demoInv());
+    state.demo = true;
+  }
+  $('#addBtn').onclick = addPiece;
+  $('#btnDemo').onclick = loadDemo;
+  $('#btnClear').onclick = () => {
+    if (state.inv && Object.values(state.inv).some(a => a.length) && !confirm('清空全部装备？')) return;
+    clearInv();
+  };
+  $('#btnExport').onclick = exportJson;
+  $('#btnImport').onclick = () => $('#fileInput').click();
+  $('#fileInput').onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) importJson(f);
+    e.target.value = '';
+  };
+  $('#btnApply').onclick = applyCustom;
+  $('#btnPresetBow').onclick = () => presetCustom({ DL:3, WH:3, REG:3, ATK:3, BOW:3, CD:3 });
+  $('#btnPresetClassic').onclick = () => presetCustom(MODES.classic.targets);
+  $('#btnPresetZero').onclick = () => presetCustom({});
+  renderAll();
+}
+document.addEventListener('DOMContentLoaded', boot);
+</script>
+</body>
+</html>
