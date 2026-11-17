@@ -144,6 +144,7 @@ body{
 .target[data-state="ok"] .tval{color:var(--ok)}
 .target[data-state="over"] .tval{color:var(--bad)}
 .target[data-state="part"] .tval{color:var(--warn)}
+.target[data-state="zero"] .tval{color:var(--accent)}
 .mode-note{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.6}
 
 /* ===== 双栏 ===== */
@@ -392,7 +393,6 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
       </div>
     </div>
     <div class="target-grid" id="targetGrid"></div>
-    <div class="mode-note" id="modeNote"></div>
   </section>
 
   <div class="cols">
@@ -954,7 +954,6 @@ function renderTargets() {
     $('#targetSub').textContent = '';
     pill.textContent = '未设置';
     pill.dataset.state = 'zero';
-    $('#modeNote').textContent = '这套搭配还没有目标词条：去右上角「毕业词条」页把它填起来。';
     return;
   }
 
@@ -978,11 +977,6 @@ function renderTargets() {
   pill.textContent = (score >= totalTarget) ? ('完成 ' + totalTarget + ' / ' + totalTarget + ' 条') : (score + ' / ' + totalTarget + ' 条');
   pill.dataset.state = (score >= totalTarget) ? 'ok' : (score > 0 ? 'part' : 'zero');
   $('#targetSub').textContent = '共 ' + totalTarget + ' 条';
-
-  const p = activePreset();
-  $('#modeNote').textContent = '「' + p.name + '」' + (p.desc ? p.desc : targetSummary(targets))
-    + '，合计 ' + totalTarget + ' 条。'
-    + (totalTarget > 18 ? '已超过 18 条上限，实际凑不满。' : '');
 }
 
 /* ===== 渲染：搭配列表（毕业词条页）===== */
