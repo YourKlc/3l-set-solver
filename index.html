@@ -281,10 +281,10 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
       </section>
 
       <p class="note">
-        <b>求解规则</b>：6 个部位（帽子 / 上衣 / 裤子 / 披风 / 手套 / 鞋子）各取 1 件，每件 3 条互不相同的词条，合计 18 条；
-        四类通用词条（Dimensional Leap、White Hole、Registry、ATK）各 3 条不变。<br>
-        <b>与原站的差异</b>：原版要求「Mage / Pirate / Thief / Warrior / Bowman 各 1 条 + Crit DMG 1 条」共 6 条职业与暴伤词条，
-        本版把这 6 条改为「Bowman ×3 + Crit DMG ×3」，总数仍是 18 条。<br>
+        <b>求解规则</b>：6 个部位（帽子 / 上衣 / 裤子 / 披风 / 手套 / 鞋子）各取 1 件，每件 3 条互不相同的词条，合计 18 条。<br>
+        <b>目标口径</b>：Dimensional Leap、White Hole、Registry、ATK 各 3 条，加上 Bowman 3 条与 Crit DMG 3 条，共 18 条；
+        Mage / Pirate / Thief / Warrior 不计入目标，带这类词条的装备无法进满 18 条的方案。
+        换口径去「毕业词条」页自己填。<br>
         <b>算法</b>：按部位顺序做记忆化动态规划求最优，枚举时用目标上限剪枝，因此能给出「可行方案总数」；
         18 条凑不齐时，给出最接近的方案与缺口，而不是直接报无解。
       </p>
@@ -304,7 +304,7 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
       <div class="inv-tools">
         <button class="primary cust-apply" id="btnApply">用这套目标求解</button>
         <button class="ghost" id="btnPresetBow">套用 Bowman 版</button>
-        <button class="ghost" id="btnPresetClassic">套用经典版</button>
+        <button class="ghost" id="btnPresetClassic">套用五职业版</button>
         <button class="ghost" id="btnPresetZero">全部清零</button>
       </div>
     </section>
@@ -367,9 +367,9 @@ const MODES = {
     note:'当前：通用四类各 3 条 + Bowman 3 条 + Crit DMG 3 条，正好 18 条。Mage / Pirate / Thief / Warrior 不再计入目标。'
   },
   classic: {
-    label:'经典：5 职业各 1 + Crit DMG 1',
+    label:'五职业各 1 + Crit DMG 1',
     targets:{ DL:3, WH:3, REG:3, ATK:3, MAGE:1, PIRATE:1, THIEF:1, WARRIOR:1, BOW:1, CD:1 },
-    note:'原站目标：通用四类各 3 条 + 5 个职业各 1 条 + Crit DMG 1 条，也是 18 条。'
+    note:'预设口径：通用四类各 3 条 + 五个职业各 1 条 + Crit DMG 1 条，合计 18 条。'
   },
   custom: {
     label:'自定义',
@@ -640,7 +640,7 @@ function renderTargets() {
     $('#targetSub').textContent = '';
     pill.textContent = '未设置';
     pill.dataset.state = 'zero';
-    $('#modeNote').textContent = '还没有设置目标词条：去右上角「毕业词条」页填一套，或在上面切回 Bowman / 经典预设。';
+    $('#modeNote').textContent = '还没有设置目标词条：去右上角「毕业词条」页填一套，或在上面切回 Bowman / 五职业预设。';
     $('#leadNote').textContent = '当前目标：未设置';
     return;
   }
@@ -909,7 +909,7 @@ function renderResult() {
     pill.dataset.state = 'zero';
     const p = el('p', 'empty');
     if (!LAST) {
-      p.textContent = '还没有设置目标词条：去右上角「毕业词条」页填一套，或在目标卡里切回 Bowman / 经典预设。';
+      p.textContent = '还没有设置目标词条：去右上角「毕业词条」页填一套，或在目标卡里切回 Bowman / 五职业预设。';
     } else if (!LAST.emptySlots.length) {
       p.textContent = '暂时没有可行搭配。';
     } else {
