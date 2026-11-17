@@ -1716,7 +1716,7 @@ async function startScan() {
   SCAN.raf = requestAnimationFrame(paint);
 
   if (SCAN.timer) clearInterval(SCAN.timer);
-  SCAN.timer = setInterval(ocrTick, 450);
+  SCAN.timer = setInterval(ocrTick, 200);
 
   try { ensureWorker(); } catch (e) { /* 错误在 ocrTick 里统一提示 */ }
 }
@@ -1972,7 +1972,7 @@ async function pumpOcr() {
     SCAN.busy = false;
     setScanPill(SCAN.stream ? '运行中' : '已停止', SCAN.stream ? 'ok' : 'zero');
     /* 一次识别一块，读完后稍歇再取下一块，别把 CPU 全占满让人物卡住 */
-    if (SCAN.queue.length) setTimeout(pumpOcr, 250);
+    if (SCAN.queue.length) setTimeout(pumpOcr, 80);
   }
 }
 
