@@ -1214,6 +1214,7 @@ function renderTagGrid() {
   const box = $('#tagGrid');
   box.innerHTML = '';
   TAGS.forEach(t => {
+    if (t.k === 'OTHER') return;   /* 手动加装备时不给选 Other：认不出的词条由识别自己记 */
     const at = state.pick.lines.indexOf(t.k);
     const btn = el('button', 'tbtn s-' + t.k.toLowerCase(), t.name);
     btn.dataset.group = t.group;
@@ -1231,7 +1232,6 @@ function renderPreview() {
     const k = state.pick.lines[i];
     const cell = el('div', 'pline');
     cell.dataset.empty = k ? '0' : '1';
-    cell.appendChild(el('span', 'ph', 'line ' + (i + 1)));
     cell.appendChild(el('span', 'pv', k ? TAGMAP[k].name : '未选'));
     box.appendChild(cell);
   }
@@ -1518,6 +1518,7 @@ function clearInv() {
   state.solIndex = 0;
   /* 清空库存后，之前判过的重复不再算重复 */
   SCAN.seen = Object.create(null);
+  SCAN.dups = Object.create(null);
   renderAll();
 }
 function exportJson() {
@@ -1578,7 +1579,7 @@ const SCAN = {
   worker:null, loading:null,
   lastHash:'', lastAt:0, busy:false,
   records:[], seq:0, raw:'',
-  seen:Object.create(null), skipped:0, diag:[],
+  seen:Object.create(null), dups:Object.create(null), skipped:0, diag:[],
   prevGrid:null, lastBox:null, queue:[], holdUntil:0, missCount:0, lastSig:null, lastEnqAt:0
 };
 
@@ -1757,6 +1758,7 @@ async function startScan() {
   $('#btnScanRect').disabled = false;
   setScanPill('运行中', 'ok');
   SCAN.seen = Object.create(null);
+  SCAN.dups = Object.create(null);
   SCAN.skipped = 0;
   SCAN.lastHash = '';
   SCAN.lastSig = null;
@@ -1781,7 +1783,7 @@ async function startScan() {
   let last = 0;
   const paint = ts => {
     if (!SCAN.stream) return;
-    if (ts - last > 60) {
+    if (ts - last > PREVIEW_MS) {   /* 页面上这块预览按 3 帧/秒刷新，识别仍按视频原始帧走 */
       last = ts;
       if (video.videoWidth && canvas.width !== video.videoWidth) {
         canvas.width = video.videoWidth;
@@ -2033,7 +2035,8 @@ function itemTitle(t) {
 
 /* 截取和识别分开：采集按固定节拍「拍」当前浮窗，内容变了才进队列让 OCR 读。
    一次 OCR 要一秒多，采集不等它，所以连续划过多件也不漏。 */
-const QUEUE_MAX = 20;              /* 最多排队等识别的截图数：每换一件会多拍一张空背景，20 张≈10 件 */
+const QUEUE_MAX = 40;              /* 最多排队等识别的截图数（约 20 件，换件时会多拍一张空背景） */
+const PREVIEW_MS = 333;            /* 页面上游戏画面按 3 帧/秒刷新，识别仍按视频原始帧走 */
 
 function enqueueCrop(c) {
   if (SCAN.queue.length >= QUEUE_MAX) return false;       /* 队列最多排 10 件，塞满时先不拍 */
@@ -2439,14 +2442,27 @@ function addScanRecord(o) {
   const sig = scanSig(lines);
   const key = o.slot + '|' + sig;
   const inInv = (state.inv[o.slot] || []).some(it => scanSig(it.lines) === sig);
-  /* 同一件装备反复划过只留一件，直到换下一件 */
+  /* 同一件装备反复划过只留一件，直到换下一件；重复的也记一笔，同一个只记一次、累计次数 */
   if (inInv || SCAN.seen[key]) {
     SCAN.seen[key] = true;
     SCAN.skipped++;
-    dlog('跳过重复：' + slotLabel(o.slot) + ' ' + sig.replace(/\|/g, '/'));
+    let dupRec = SCAN.dups[key];
+    if (dupRec) {
+      dupRec.times = (dupRec.times || 1) + 1;
+    } else {
+      dupRec = {
+        id: ++SCAN.seq, slot:o.slot, lines:lines.slice(), detected:detected,
+        score:o.score, source:o.source, added:false, pending:false, dup:true, times:1
+      };
+      SCAN.records.unshift(dupRec);
+      if (SCAN.records.length > 60) SCAN.records.length = 60;
+      SCAN.dups[key] = dupRec;
+    }
+    dlog('跳过重复：' + slotLabel(o.slot) + ' ' + sig.replace(/\|/g, '/') + ' ×' + dupRec.times);
     const slotInfo = $('#scanSlotInfo');
     if (slotInfo) slotInfo.textContent = '部位：' + slotLabel(o.slot) + '（重复，已跳过）';
     scanProgress();
+    renderScanLog();
     return;
   }
 
@@ -2543,7 +2559,11 @@ function renderScanLog() {
     const flag = el('span', 'flag');
     if (rec.added) { flag.textContent = '已入库'; }
     else if (rec.undo) { flag.textContent = '已撤销'; flag.className = 'flag mute'; }
-    else if (rec.dup) { flag.textContent = '已存在'; flag.className = 'flag mute'; }    else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
+    else if (rec.dup) {
+      flag.textContent = '已存在' + ((rec.times || 1) > 1 ? ' ×' + rec.times : '');
+      flag.className = 'flag mute';
+    }
+    else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
     row.appendChild(flag);
 
     if (rec.pending) {
