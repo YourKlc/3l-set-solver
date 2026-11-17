@@ -1730,12 +1730,19 @@ function stopScan() {
   }
   if (SCAN.raf) { cancelAnimationFrame(SCAN.raf); SCAN.raf = null; }
   if (SCAN.timer) { clearInterval(SCAN.timer); SCAN.timer = null; }
-  SCAN.queue = [];
   SCAN.holdUntil = 0;
   SCAN.missCount = 0;
   $('#btnScanStop').disabled = true;
   $('#btnScanStart').disabled = false;
   $('#btnScanRect').disabled = true;
+  /* 已拍下的浮窗不丢，继续读完再收工 */
+  if (SCAN.queue.length) {
+    setScanPill('收尾识别 · 剩 ' + SCAN.queue.length, 'part');
+    scanNote('已停止共享窗口，正在把已经拍下的 ' + SCAN.queue.length + ' 件读完……');
+    dlog('已停止共享，队列里还有 ' + SCAN.queue.length + ' 件要读');
+    pumpOcr();
+    return;
+  }
   setScanPill('已停止', 'zero');
   const added = SCAN.records.filter(r => r.added).length;
   scanNote('已停止共享窗口。本次录入 ' + added + ' 件'
@@ -1888,13 +1895,16 @@ function autoCrop() {
 }
 
 /* 两件浮窗并排（对比穿在身上的那件）时只认左边这件：
-   用 OCR 认出的 "Supercharged" 词的中心 x 找两簇，取两簇中间那道缝切一刀 */
+   只看浮窗「标题那一行」的 Supercharged（下面套装加成那行也带这个词，不能算），
+   两个标题的中心 x 差得够远，才在中间切一刀 */
 function leftOfSecondPanel(c, words) {
-  const W = c.width;
+  const W = c.width, H = c.height;
   const xs = [];
   (words || []).forEach(w => {
     const u = String(w.text || '').toUpperCase();
-    if (u.indexOf('SUPERCHARGED') === 0) xs.push((w.bbox.x0 + w.bbox.x1) / 2);
+    if (u.indexOf('SUPERCHARGED') === 0 && w.bbox.y0 < H * 0.3) {
+      xs.push((w.bbox.x0 + w.bbox.x1) / 2);
+    }
   });
   if (xs.length < 2) return null;
   xs.sort((a, b) => a - b);
@@ -1966,10 +1976,11 @@ function ocrTick() {
 }
 
 async function pumpOcr() {
-  if (SCAN.busy || !SCAN.queue.length || !SCAN.worker || !SCAN.stream) return;
+  if (SCAN.busy || !SCAN.queue.length || !SCAN.worker) return;
   const job = SCAN.queue.shift();
   SCAN.busy = true;
-  setScanPill('识别中', 'part');
+  const left = SCAN.queue.length + 1;
+  setScanPill(SCAN.stream ? ('识别中 · 剩 ' + left) : ('收尾识别 · 剩 ' + left), 'part');
   try {
     let r = await SCAN.worker.recognize(job.canvas);
     let txt = r.data.text;
@@ -1981,6 +1992,17 @@ async function pumpOcr() {
       txt = r.data.text;
       note = ' 只读左边的浮窗';
       dlog('检测到两件浮窗，只读左边那件（' + lp.width + 'px 宽）');
+    }
+    /* 只读到装备名、词条一条都没认出来：多半截短了，往下扩一截再读一次 */
+    if (!parseItemTags(txt).detected && /SUPERCHARGED|LIBAE/i.test(txt || '') && SCAN.lastBox && !job.wide) {
+      const lb = SCAN.lastBox;
+      const wide = cropBox({ x:lb.x - 20, y:lb.y - 20, w:lb.w + 40, h:Math.round(lb.h * 1.7) + 20 });
+      if (wide) {
+        dlog('词条没读全，扩大范围重读（' + wide.width + 'x' + wide.height + '）');
+        r = await SCAN.worker.recognize(wide);
+        const t2 = r.data.text;
+        if (parseItemTags(t2).detected) { txt = t2; note += ' 扩范围重读'; }
+      }
     }
     dlog('OCR ' + job.canvas.width + 'x' + job.canvas.height + note + ' 读到 '
       + String(txt || '').replace(/\s+/g, ' ').trim().slice(0, 90));
@@ -1998,9 +2020,15 @@ async function pumpOcr() {
     dlog('OCR 出错：' + ((e && e.message) || e));
   } finally {
     SCAN.busy = false;
-    setScanPill(SCAN.stream ? '运行中' : '已停止', SCAN.stream ? 'ok' : 'zero');
+    if (!SCAN.queue.length) setScanPill(SCAN.stream ? '运行中' : '已停止', SCAN.stream ? 'ok' : 'zero');
+    else setScanPill(SCAN.stream ? '运行中' : '收尾识别', 'part');
     /* 一次识别一块，读完后稍歇再取下一块，别把 CPU 全占满让人物卡住 */
     if (SCAN.queue.length) setTimeout(pumpOcr, 80);
+    else if (!SCAN.stream) {
+      const added = SCAN.records.filter(r => r.added).length;
+      scanNote('已停止共享窗口。本次录入 ' + added + ' 件'
+        + (SCAN.skipped ? '，跳过重复 ' + SCAN.skipped + ' 次' : '') + '，都留在库存里。');
+    }
   }
 }
 
