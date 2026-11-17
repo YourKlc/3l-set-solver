@@ -1913,6 +1913,9 @@ function autoCrop() {
     y1 = Math.min(H, lb.y + lb.h + 12);
   }
   if (x1 - x0 < 160 || y1 - y0 < 160) return null;
+  /* 浮窗常常只露出一截（下半截上一件还在屏上时，只有标题那几行算「变化」），
+     词条在标题下面，所以往下补到整块浮窗的高度再读，别只截到标题 */
+  if (y1 - y0 < 820) y1 = Math.min(H, y0 + 820);
   /* 整窗都变了（切场景/滚动背包）就别读了，白花几秒 */
   if ((x1 - x0) * (y1 - y0) > W * H * 0.35) return null;
   const c = document.createElement('canvas');
@@ -1949,6 +1952,14 @@ function leftOfSecondPanel(c, words) {
   out.height = c.height;
   out.getContext('2d').drawImage(c, 0, 0, split, c.height, 0, 0, split, c.height);
   return out;
+}
+
+/* 从 OCR 文本里取装备名（Supercharged 后面那段的字母），用来比对是不是同一件 */
+function itemTitle(t) {
+  const s = String(t || '').replace(/\s+/g, '');
+  const i = s.search(/SUPERCHARGED/i);
+  if (i < 0) return '';
+  return s.slice(i, i + 30).replace(/[^A-Za-z]/g, '').toLowerCase().slice(0, 20);
 }
 
 /* 截取和识别分开：采集按固定节拍「拍」当前浮窗，内容变了才进队列让 OCR 读。
@@ -2032,7 +2043,12 @@ async function pumpOcr() {
         dlog('词条没读全，扩大范围重读（' + wide.width + 'x' + wide.height + '）');
         r = await SCAN.worker.recognize(wide);
         const t2 = r.data.text;
-        if (parseItemTags(t2).detected) { txt = t2; note += ' 扩范围重读'; }
+        /* 扩范围读的是「此刻」的画面，鼠标可能已经移到下一件了：
+           装备名对不上就不算，免得把别的装备记进来 */
+        if (parseItemTags(t2).detected && itemTitle(t2) && itemTitle(t2) === itemTitle(txt)) {
+          txt = t2;
+          note += ' 扩范围重读';
+        }
       }
     }
     dlog('OCR ' + job.canvas.width + 'x' + job.canvas.height + note + ' 读到 '
