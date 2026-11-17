@@ -252,8 +252,6 @@ button.del:hover{color:var(--bad)}
 }
 .sol-row .slot{font-size:12.5px;font-weight:700;color:var(--ink)}
 .sol-row .tagno{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-.need{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-.need .h{font-size:12px;color:var(--muted);margin-bottom:6px}
 .gap-hint{font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:10px}
 .gap-row{
   display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;align-items:center;
@@ -497,10 +495,6 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
       <section class="card result">
         <div class="card-head"><h2>最优一套</h2><span class="pill" id="resultPill" data-state="zero">—</span></div>
         <div id="resultBody"></div>
-        <div class="need" id="needBox" hidden>
-          <div class="h">还差的词条</div>
-          <div class="chips" id="needChips"></div>
-        </div>
       </section>
 
       <!-- ===== 再添一件就能齐 ===== -->
@@ -512,21 +506,12 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
         <div id="gapBody"></div>
       </section>
 
-      <!-- ===== 可用性检查 ===== -->
-      <section class="card">
-        <div class="card-head">
-          <h2>可用性检查<span id="useSub"></span></h2>
-          <span class="pill" id="usePill" data-state="zero">—</span>
-        </div>
-        <div id="useBody"></div>
-      </section>
-
       <p class="note">
         <b>求解规则</b>：6 个部位（帽子 / 上衣 / 裤子 / 披风 / 手套 / 鞋子）各取 1 件，每件 3 条互不相同的词条，合计 18 条。<br>
         <b>目标搭配</b>：默认是「五职业」——Dimensional Leap、White Hole、Registry、ATK 各 3 条，五个职业各 1 条，Crit DMG 1 条；
         想换目标就去「毕业词条」页新增一套搭配，填好条数、起好名字，之后在目标卡上方用标签页切换。<br>
         <b>算法</b>：按部位顺序做记忆化动态规划求最优，枚举时用目标上限剪枝，因此能给出「可行方案总数」；
-        18 条凑不齐时，给出最接近的方案与缺口，而不是直接报无解。<br>
+        18 条凑不齐时，给出最接近的方案，而不是直接报无解。<br>
         <b>差一件就齐</b>：某个部位还没有装备、且缺口不超过 3 条时，会单独列出「再添一件就能齐」——
         说明这件装备带哪几条词条就能凑满目标（多出来的词条不计数）。
       </p>
@@ -1346,12 +1331,8 @@ function renderGapPanel(gaps) {
 /* ===== 渲染：结果 ===== */
 function renderResult() {
   const body = $('#resultBody');
-  const needBox = $('#needBox');
-  const needChips = $('#needChips');
   const pill = $('#resultPill');
   body.innerHTML = '';
-  needBox.hidden = true;
-  needChips.innerHTML = '';
   $('#gapCard').hidden = true;
   $('#gapBody').innerHTML = '';
 
@@ -1446,87 +1427,7 @@ function renderResult() {
     const need = LAST.targets[k];
     if (got < need) gaps.push({ k: k, miss: need - got });
   });
-  if (gaps.length) {
-    needBox.hidden = false;
-    gaps.forEach(g => {
-      const c = chipNode(g.k, false);
-      c.textContent = TAGMAP[g.k].name + ' \u00d7' + g.miss;
-      c.dataset.tag = g.k;
-      needChips.appendChild(c);
-    });
-  }
   renderGapPanel(gaps);
-  /* 缺口已经由「再添一件就能齐」讲清楚时，目标卡里就不再重复列一遍 */
-  if (!$('#gapCard').hidden) needBox.hidden = true;
-}
-
-/* ===== 渲染：可用性检查 ===== */
-function renderUsability() {
-  const body = $('#useBody');
-  const pill = $('#usePill');
-  body.innerHTML = '';
-
-  const targets = activeTargets();
-  const keys = Object.keys(targets);
-  if (!keys.length) {
-    $('#useSub').textContent = '';
-    pill.textContent = '未设置';
-    pill.dataset.state = 'zero';
-    body.appendChild(el('p', 'empty', '先设置目标词条，这里才能判断每件装备能不能用。'));
-    return;
-  }
-  const totalTarget = keys.reduce((a, k) => a + targets[k], 0);
-  const strict = (totalTarget === 18);
-
-  const good = [];
-  const bad = [];
-  SLOTS.forEach(s => {
-    state.inv[s.key].forEach((p, i) => {
-      const off = p.lines.filter(k => targets[k] === undefined);
-      const item = { slot:s, idx:i + 1, piece:p, off:off };
-      if (off.length === 0) good.push(item);
-      else bad.push(item);
-    });
-  });
-
-  const total = good.length + bad.length;
-  $('#useSub').textContent = total ? ('共 ' + total + ' 件') : '';
-  pill.textContent = total
-    ? (good.length + (strict ? ' 件可进满 18 条' : ' 件全命中目标'))
-    : '暂无装备';
-  pill.dataset.state = total ? (bad.length ? 'part' : 'ok') : 'zero';
-
-  if (!total) {
-    body.appendChild(el('p', 'empty', '库存为空，先在左侧加件，或点「载入示例」看一套现成数据。'));
-    return;
-  }
-  if (!bad.length) {
-    body.appendChild(el('p', 'empty',
-      '全部 ' + total + ' 件的 3 条词条都在目标内，任何一件都能参与方案。'));
-    return;
-  }
-
-  body.appendChild(el('p', 'empty', strict
-    ? ('下面 ' + bad.length + ' 件带目标外词条。因为每个部位只能上 1 件、且 18 条要一条不浪费，'
-       + '这些件进不了满 18 条的方案（标红的就是用不上的词条）：')
-    : ('下面 ' + bad.length + ' 件含目标外词条。当前目标合计 ' + totalTarget + ' 条（未满 18），允许出现空位，'
-       + '这些件仍可上场，只是目标外那几条会空转：')));
-
-  const list = el('div', 'sol');
-  bad.forEach(item => {
-    const row = el('div', 'sol-row');
-    row.appendChild(el('div', 'slot', item.slot.label));
-    row.appendChild(el('div', 'tagno', '#' + item.idx));
-    const chips = el('div', 'chips');
-    item.piece.lines.forEach(k => {
-      const isOff = item.off.indexOf(k) >= 0;
-      const cls = isOff ? (strict ? 'bad' : 's-' + k.toLowerCase() + ' dim') : 's-' + k.toLowerCase();
-      chips.appendChild(el('span', 'chip ' + cls, TAGMAP[k].name));
-    });
-    row.appendChild(chips);
-    list.appendChild(row);
-  });
-  body.appendChild(list);
 }
 
 /* ===== 主渲染 ===== */
@@ -1544,7 +1445,6 @@ function renderAll() {
   renderPreview();
   renderInventory();
   renderResult();
-  renderUsability();
   renderCustom();
   renderScan();
   save();
