@@ -1673,7 +1673,12 @@ async function makeWorker() {
   try {
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+%.: ',
-      preserve_interword_spaces: '1'
+      preserve_interword_spaces: '1',
+      /* 一块浮窗就是一段整齐的文字块：用单块模式 + 关掉词典，读得更快，连续划过多件不积压 */
+      tessedit_pageseg_mode: '6',
+      load_system_dawg: '0',
+      load_freq_dawg: '0',
+      user_defined_dawg: '0'
     });
   } catch (e) { dlog('setParameters 跳过：' + ((e && e.message) || e)); }
   SCAN.worker = worker;
@@ -1700,13 +1705,13 @@ async function grabGameWindow() {
   /* displaySurface 是给选择器的提示：让它默认停在「窗口 / 程序」这一页 */
   try {
     return await navigator.mediaDevices.getDisplayMedia({
-      video:{ displaySurface:'window', frameRate:{ ideal:12, max:20 } }, audio:false
+      video:{ displaySurface:'window', frameRate:{ ideal:15, max:30 } }, audio:false
     });
   } catch (e) {
     /* 用户自己取消就别再弹一次；只是这个提示不被支持时才退回普通参数 */
     if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) throw e;
     return navigator.mediaDevices.getDisplayMedia({
-      video:{ frameRate:{ ideal:12, max:20 } }, audio:false
+      video:{ frameRate:{ ideal:15, max:30 } }, audio:false
     });
   }
 }
@@ -1782,7 +1787,7 @@ async function startScan() {
   SCAN.raf = requestAnimationFrame(paint);
 
   if (SCAN.timer) clearInterval(SCAN.timer);
-  SCAN.timer = setInterval(ocrTick, 200);
+  SCAN.timer = setInterval(ocrTick, 150);   /* 每件浮窗可能只停 200ms，采集得比它快 */
 
   try { ensureWorker(); } catch (e) { /* 错误在 ocrTick 里统一提示 */ }
 }
@@ -2021,13 +2026,13 @@ function itemTitle(t) {
 
 /* 截取和识别分开：采集按固定节拍「拍」当前浮窗，内容变了才进队列让 OCR 读。
    一次 OCR 要一秒多，采集不等它，所以连续划过多件也不漏。 */
-const QUEUE_MAX = 10;              /* 最多排队等识别的浮窗张数 */
+const QUEUE_MAX = 20;              /* 最多排队等识别的截图数：每换一件会多拍一张空背景，20 张≈10 件 */
 
 function enqueueCrop(c) {
   if (SCAN.queue.length >= QUEUE_MAX) return false;       /* 队列最多排 10 件，塞满时先不拍 */
   const sig = sigOf(c);
   if (sigChanged(sig, SCAN.lastSig) < 20) return false;   /* 还是那件浮窗（只是画面抖动/闪光） */
-  if (Date.now() - SCAN.lastEnqAt < 150) return false;   /* 一秒拍几十张会把队列塞爆 */
+  if (Date.now() - SCAN.lastEnqAt < 100) return false;   /* 一秒拍几十张会把队列塞爆 */
   SCAN.lastSig = sig;
   SCAN.lastEnqAt = Date.now();
   SCAN.queue.push({ canvas:c, at:Date.now() });
