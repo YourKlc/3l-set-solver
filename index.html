@@ -333,6 +333,14 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
   font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
   max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word;
 }
+.scan-diag{margin-top:10px;font-size:12px;color:var(--muted)}
+.scan-diag summary{cursor:pointer;font-weight:600;color:var(--ink);font-size:12px}
+.scan-diag .diag-tools{display:flex;gap:6px;margin:8px 0 6px}
+.diag-body{
+  width:100%;box-sizing:border-box;min-height:96px;max-height:180px;resize:vertical;
+  border:1px solid var(--line);border-radius:7px;background:var(--sunk);color:var(--ink);
+  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.55;padding:8px 9px;
+}
 </style>
 </head>
 <body>
@@ -412,6 +420,16 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
             </div>
             <div id="scanLog"></div>
             <div class="scan-raw" id="scanRaw" hidden></div>
+
+            <details class="scan-diag" id="scanDiag">
+              <summary>诊断日志（识别出问题时可以复制发我）</summary>
+              <div class="diag-tools">
+                <button class="mini" id="btnDiagCopy">复制日志</button>
+                <button class="mini" id="btnDiagClear">清空</button>
+                <span class="hint" id="scanDiagPill"></span>
+              </div>
+              <textarea class="diag-body" id="scanDiagBody" readonly spellcheck="false"></textarea>
+            </details>
           </div>
         </div>
 
@@ -1514,10 +1532,27 @@ const SCAN = {
   worker:null, loading:null,
   lastHash:'', lastAt:0, busy:false,
   records:[], seq:0, raw:'',
-  seen:Object.create(null), skipped:0
+  seen:Object.create(null), skipped:0, diag:[]
 };
 
 function scanSig(lines) { return lines.slice().sort().join('|'); }
+/* 识别诊断日志：引擎加载、窗口共享、每帧 OCR 结果、异常，都记在页面里，方便复制反馈 */
+function dlog(msg) {
+  const d = new Date();
+  const p2 = n => (n < 10 ? '0' + n : '' + n);
+  const ts = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  SCAN.diag.push(ts + ' ' + msg);
+  if (SCAN.diag.length > 200) SCAN.diag.shift();
+  const box = $('#scanDiagBody');
+  if (box) { box.value = SCAN.diag.join('\n'); box.scrollTop = box.scrollHeight; }
+}
+window.addEventListener('error', e => {
+  dlog('页面异常 ' + (e && e.message ? e.message : '') + (e && e.filename ? ' @' + String(e.filename).split('/').pop() + ':' + e.lineno : ''));
+});
+window.addEventListener('unhandledrejection', e => {
+  const r = e && e.reason;
+  dlog('未处理的 Promise 错误 ' + (r && (r.message || r) ? (r.message || r) : r));
+});
 function scanNote(text) {
   const n = $('#scanNote');
   if (n) n.textContent = text || '';
@@ -1537,15 +1572,26 @@ function setEngine(text) {
 function loadOcrScript() {
   if (window.Tesseract) return Promise.resolve();
   if (SCAN.loading) return SCAN.loading;
+  dlog('开始加载识别脚本 ' + OCR_CDN.script.split('/').slice(-2).join('/'));
   SCAN.loading = new Promise((resolve, reject) => {
     let settled = false;
     const s = document.createElement('script');
     s.src = OCR_CDN.script;
-    s.onload = () => { if (!settled) { settled = true; resolve(); } };
-    s.onerror = () => { if (!settled) { settled = true; SCAN.loading = null; reject(new Error('识别引擎下载失败，请联网后重试')); } };
+    s.onload = () => { if (!settled) { settled = true; dlog('识别脚本已就绪'); resolve(); } };
+    s.onerror = () => {
+      if (!settled) {
+        settled = true; SCAN.loading = null;
+        dlog('识别脚本下载失败（需要联网 / 会被墙）');
+        reject(new Error('识别引擎下载失败，请联网后重试'));
+      }
+    };
     document.head.appendChild(s);
     setTimeout(() => {
-      if (!settled) { settled = true; SCAN.loading = null; reject(new Error('识别引擎加载超时，请检查网络')); }
+      if (!settled) {
+        settled = true; SCAN.loading = null;
+        dlog('识别脚本加载超时 30s');
+        reject(new Error('识别引擎加载超时，请检查网络'));
+      }
     }, 30000);
   });
   return SCAN.loading;
@@ -1556,14 +1602,18 @@ async function ensureWorker() {
   setEngine('加载中…');
   await loadOcrScript();
   if (!window.Tesseract) throw new Error('识别引擎不可用');
+  dlog('创建识别引擎（首次约 7MB，耐心等）');
   const worker = await Tesseract.createWorker('eng', 1, {
     workerPath: OCR_CDN.worker,
     corePath: OCR_CDN.core,
     langPath: OCR_CDN.lang,
     logger: m => {
-      if (m && m.status === 'loading language traineddata') {
+      if (!m) return;
+      if (m.status === 'loading language traineddata') {
         setEngine('加载语言包 ' + Math.round((m.progress || 0) * 100) + '%');
-      } else if (m && m.status === 'initializing api') {
+        const p = Math.round((m.progress || 0) * 100);
+        if (p === 0 || p >= 100 || p % 25 === 0) dlog('语言包 ' + p + '%');
+      } else if (m.status === 'initializing api') {
         setEngine('初始化…');
       }
     }
@@ -1573,9 +1623,10 @@ async function ensureWorker() {
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+%.: ',
       preserve_interword_spaces: '1'
     });
-  } catch (e) { /* 个别版本不支持就跳过 */ }
+  } catch (e) { dlog('setParameters 跳过：' + ((e && e.message) || e)); }
   SCAN.worker = worker;
   setEngine('就绪');
+  dlog('识别引擎就绪');
   return worker;
 }
 
@@ -1596,18 +1647,24 @@ async function grabGameWindow() {
 }
 
 async function startScan() {
+  dlog('环境：' + location.protocol + ' 安全上下文=' + (window.isSecureContext ? '是' : '否')
+    + ' mediaDevices=' + !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia));
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    dlog('当前环境不支持 getDisplayMedia');
     scanNote('这个浏览器不支持共享窗口，请用 Chrome / Edge，或改用下面的截图识别。');
     return;
   }
   setScanPill('选择窗口…', 'part');
   scanNote('在弹出的列表里选中游戏窗口（默认就停在「窗口」这一页）。');
+  dlog('请求共享窗口（displaySurface:window）');
   try {
     SCAN.stream = await grabGameWindow();
   } catch (e) {
     SCAN.stream = null;
     setScanPill('未开始', 'zero');
-    scanNote('没能共享窗口（' + ((e && e.name) || 'Error') + '）。可以再点一次，或者改用截图识别。');
+    dlog('共享窗口失败 ' + ((e && e.name) || 'Error') + '：' + ((e && e.message) || ''));
+    scanNote('没能共享窗口（' + ((e && e.name) || 'Error') + '）。'
+      + (location.protocol === 'file:' ? '本地双击打开（file://）时浏览器可能不允许共享窗口，可以改用下面的截图识别，或打开在线版。' : '可以再点一次，或者改用截图识别。'));
     return;
   }
 
@@ -1630,7 +1687,11 @@ async function startScan() {
     : '整窗识别中：划过一件装备就会录入一件，重复的会跳过，直到你点「停止」。框选一块浮窗区域会更快更准。');
 
   const track = SCAN.stream.getVideoTracks()[0];
-  if (track) track.onended = stopScan;
+  if (track) {
+    track.onended = stopScan;
+    const st = track.getSettings ? track.getSettings() : {};
+    dlog('共享开始：' + (track.label || '窗口') + ' ' + (st.width || '?') + 'x' + (st.height || '?'));
+  }
 
   if (SCAN.raf) cancelAnimationFrame(SCAN.raf);
   let last = 0;
@@ -1705,7 +1766,11 @@ function hashCanvas(c) {
 async function ocrTick() {
   if (!SCAN.stream || SCAN.busy || !SCAN.panelOpen || state.page !== 'solve') return;
   if (!SCAN.worker) {
-    try { await ensureWorker(); } catch (e) { setEngine('不可用（需要联网）'); return; }
+    try { await ensureWorker(); } catch (e) {
+      setEngine('不可用（需要联网）');
+      dlog('引擎初始化失败：' + ((e && e.message) || e));
+      return;
+    }
   }
   const c = cropCanvas();
   if (!c) return;
@@ -1717,9 +1782,11 @@ async function ocrTick() {
   setScanPill('识别中', 'part');
   try {
     const r = await SCAN.worker.recognize(c);
+    dlog('OCR ' + c.width + 'x' + c.height + ' 读到 ' + String(r.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 90));
     handleOcrText(r.data.text, '窗口');
   } catch (e) {
     scanNote('识别出错：' + ((e && e.message) || e));
+    dlog('OCR 出错：' + ((e && e.message) || e));
   } finally {
     SCAN.busy = false;
     setScanPill(SCAN.stream ? '运行中' : '已停止', SCAN.stream ? 'ok' : 'zero');
@@ -1937,6 +2004,9 @@ function handleOcrText(text, source) {
   const slot = detectSlot(raw);
   const slotInfo = $('#scanSlotInfo');
   if (slotInfo) slotInfo.textContent = slot ? ('部位：' + slotLabel(slot)) : '部位：未认出（看装备名）';
+  dlog('解析：部位=' + (slot ? slotLabel(slot) : '未认出')
+    + ' 词条=' + item.lines.join('/') + '（读到 ' + item.detected + ' 条，把握 '
+    + Math.round(item.score * 100) + '%）');
   if (!item.detected) {
     scanNote('没认出词条行，把装备浮窗正对着画面再等一秒（框一小块区域会更准）。');
     return;
@@ -1980,6 +2050,7 @@ function addScanRecord(o) {
   if (inInv || SCAN.seen[key]) {
     SCAN.seen[key] = true;
     SCAN.skipped++;
+    dlog('跳过重复：' + slotLabel(o.slot) + ' ' + sig.replace(/\|/g, '/'));
     const slotInfo = $('#scanSlotInfo');
     if (slotInfo) slotInfo.textContent = '部位：' + slotLabel(o.slot) + '（重复，已跳过）';
     scanProgress();
@@ -2000,11 +2071,13 @@ function addScanRecord(o) {
     SCAN.seen[key] = true;
     state.solIndex = 0;
     state.pick.lines = [];
+    dlog('已入库：' + slotLabel(o.slot) + ' ' + sig.replace(/\|/g, '/'));
     scanProgress('已录入 ' + slotLabel(o.slot) + ' · ' + label + padNote);
     renderAll();
   } else {
     rec.pending = true;
     fillPick(o.slot, lines);
+    dlog('待确认：' + label + ' 把握 ' + Math.round(o.score * 100) + '%');
     scanNote('已填好 ' + slotLabel(o.slot) + ' · ' + label + padNote
       + '（把握 ' + Math.round(o.score * 100) + '%），核对无误按「加入库存」，或点记录里的「入库」。');
   }
@@ -2169,12 +2242,14 @@ async function scanImageFile(file) {
   }
   setScanPill('截图识别', 'part');
   scanNote('正在读这张图…');
+  dlog('截图识别：' + (file.name || 'image') + ' ' + bmp.width + 'x' + bmp.height);
   try {
     await ensureWorker();
     const r = await SCAN.worker.recognize(canvas);
     handleOcrText(r.data.text, '截图');
   } catch (e) {
     setEngine('不可用（需要联网）');
+    dlog('截图识别失败：' + ((e && e.message) || e));
     scanNote('识别引擎没加载起来：' + ((e && e.message) || e));
   }
 }
@@ -2211,6 +2286,30 @@ function bootScan() {
     scanNote(SCAN.auto ? '读到的装备直接加入库存。' : '读到的先填进下面这格，你按「加入库存」确认。');
   };
   bindScanRect();
+
+  const copyBtn = $('#btnDiagCopy');
+  if (copyBtn) copyBtn.onclick = async () => {
+    const txt = SCAN.diag.join('\n') || '（还没有日志）';
+    const pill = $('#scanDiagPill');
+    try {
+      await navigator.clipboard.writeText(txt);
+      if (pill) pill.textContent = '已复制到剪贴板';
+    } catch (e) {
+      const box = $('#scanDiagBody');
+      if (box) { box.focus(); box.select(); try { document.execCommand('copy'); if (pill) pill.textContent = '已复制'; } catch (e2) { if (pill) pill.textContent = '复制失败，手动全选'; } }
+    }
+  };
+  const clearBtn = $('#btnDiagClear');
+  if (clearBtn) clearBtn.onclick = () => {
+    SCAN.diag = [];
+    const box = $('#scanDiagBody');
+    if (box) box.value = '';
+    const pill = $('#scanDiagPill');
+    if (pill) pill.textContent = '已清空';
+  };
+  dlog('页面就绪：' + location.protocol + '（' + (window.isSecureContext ? '安全上下文' : '非安全上下文') + '），'
+    + '窗口共享=' + (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia ? '可用' : '不可用'));
+  dlog('浏览器：' + navigator.userAgent.replace(/^Mozilla\/5\.0 /, '').slice(0, 90));
 
   const drop = $('#scanDrop');
   const file = $('#scanFile');
