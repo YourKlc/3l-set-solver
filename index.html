@@ -374,14 +374,14 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
           </div>
           <div id="scanBody" hidden>
             <p class="mode-note">
-              点「开始共享」，在弹出的列表里选游戏窗口（默认停在「窗口」页，游戏要窗口化运行），然后在画面上拖一个方框，
-              罩住整个装备浮窗（装备名 + 3 行词条）。读出来的词条会直接填进下面的部位和 3 行；第一次用需要联网加载识别引擎。
+              点「开始共享」，在弹出的列表里选游戏窗口（默认停在「窗口」页，游戏要窗口化运行）。共享期间会一直识别你划过的每一件装备，
+              按装备名自动判部位、录入并去重，直到你点「停止」；想更准更快，可以在画面上框一块浮窗区域。第一次用需要联网加载识别引擎。
             </p>
             <div class="inv-tools" style="margin-top:0;border-top:0;padding-top:0">
               <button class="ghost" id="btnScanStart">开始共享</button>
               <button class="ghost" id="btnScanStop" disabled>停止</button>
               <button class="ghost" id="btnScanRect" disabled>重新框选</button>
-              <span class="hint"><input type="checkbox" id="scanAuto" checked> 读到就直接加入库存</span>
+              <span class="hint"><input type="checkbox" id="scanAuto" checked> 识别期间自动录入（重复的跳过）</span>
             </div>
             <div class="scan-stage" id="scanStage">
               <video id="scanVideo" autoplay muted playsinline class="scan-video"></video>
@@ -1512,7 +1512,8 @@ const SCAN = {
   panelOpen:false, auto:true,
   worker:null, loading:null,
   lastHash:'', lastAt:0, busy:false,
-  records:[], seq:0, raw:''
+  records:[], seq:0, raw:'',
+  seen:Object.create(null), skipped:0
 };
 
 function scanSig(lines) { return lines.slice().sort().join('|'); }
@@ -1620,7 +1621,12 @@ async function startScan() {
   $('#btnScanStart').disabled = true;
   $('#btnScanRect').disabled = false;
   setScanPill('运行中', 'ok');
-  scanNote(SCAN.rect ? '正在识别，把浮窗停进方框里。' : '在画面上拖一个方框，罩住整个装备浮窗（装备名 + 3 行词条）。');
+  SCAN.seen = Object.create(null);
+  SCAN.skipped = 0;
+  SCAN.lastHash = '';
+  scanNote(SCAN.rect
+    ? '正在识别，把装备浮窗停在方框里；划过的每一件都会自动录入，重复的会跳过。'
+    : '整窗识别中：划过一件装备就会录入一件，重复的会跳过，直到你点「停止」。框选一块浮窗区域会更快更准。');
 
   const track = SCAN.stream.getVideoTracks()[0];
   if (track) track.onended = stopScan;
@@ -1658,18 +1664,21 @@ function stopScan() {
   $('#btnScanStart').disabled = false;
   $('#btnScanRect').disabled = true;
   setScanPill('已停止', 'zero');
-  scanNote('已停止共享窗口，已识别到的装备都留在库存里。');
+  const added = SCAN.records.filter(r => r.added).length;
+  scanNote('已停止共享窗口。本次录入 ' + added + ' 件'
+    + (SCAN.skipped ? '，跳过重复 ' + SCAN.skipped + ' 次' : '') + '，都留在库存里。');
 }
 
 /* --- 截取区域 / 变化检测 --- */
 function cropCanvas() {
   const video = $('#scanVideo');
-  if (!SCAN.rect || !video.videoWidth) return null;
+  if (!video.videoWidth) return null;
+  const rect = SCAN.rect || { x:0, y:0, w:1, h:1 };
   const vw = video.videoWidth, vh = video.videoHeight;
-  const sx = Math.round(SCAN.rect.x * vw);
-  const sy = Math.round(SCAN.rect.y * vh);
-  const sw = Math.max(8, Math.round(SCAN.rect.w * vw));
-  const sh = Math.max(8, Math.round(SCAN.rect.h * vh));
+  const sx = Math.round(rect.x * vw);
+  const sy = Math.round(rect.y * vh);
+  const sw = Math.max(8, Math.round(rect.w * vw));
+  const sh = Math.max(8, Math.round(rect.h * vh));
   const c = document.createElement('canvas');
   c.width = Math.min(sw, vw - sx);
   c.height = Math.min(sh, vh - sy);
@@ -1693,14 +1702,14 @@ function hashCanvas(c) {
 }
 
 async function ocrTick() {
-  if (!SCAN.stream || SCAN.busy || !SCAN.rect || !SCAN.panelOpen || state.page !== 'solve') return;
+  if (!SCAN.stream || SCAN.busy || !SCAN.panelOpen || state.page !== 'solve') return;
   if (!SCAN.worker) {
     try { await ensureWorker(); } catch (e) { setEngine('不可用（需要联网）'); return; }
   }
   const c = cropCanvas();
   if (!c) return;
   const hash = hashCanvas(c);
-  if (hash === SCAN.lastHash && Date.now() - SCAN.lastAt < 4000) return;
+  if (hash === SCAN.lastHash && Date.now() - SCAN.lastAt < 2500) return;
   SCAN.lastHash = hash;
   SCAN.lastAt = Date.now();
   SCAN.busy = true;
@@ -1736,7 +1745,75 @@ function editDistance(a, b) {
   return prev[n];
 }
 
-const SCAN_KEY = TAGS.map(t => ({ k:t.k, s:t.name.toUpperCase().replace(/[^A-Z]/g, '') }));
+/* 词条别名：按「整词 / 相邻整词」比对，避免 DAMAGE 里拆出 MAGE 这种误判 */
+const TAG_ALIAS = [
+  { k:'DL',      w:['DIMENSIONAL', 'LEAP'] },
+  { k:'WH',      w:['WHITE', 'HOLE'] },
+  { k:'REG',     w:['REGISTRY'] },
+  { k:'ATK',     w:['ATK'] },
+  { k:'BOW',     w:['BOWMAN'] },
+  { k:'CD',      w:['CRIT', 'DMG'] },
+  { k:'CD',      w:['CRITICAL', 'DAMAGE'] },
+  { k:'CD',      w:['CRITDMG'] },
+  { k:'CD',      w:['CRITICALDAMAGE'] },
+  { k:'MAGE',    w:['MAGE'] },
+  { k:'PIRATE',  w:['PIRATE'] },
+  { k:'THIEF',   w:['THIEF'] },
+  { k:'WARRIOR', w:['WARRIOR'] },
+  { k:'OTHER',   w:['OTHER'] }
+];
+
+/* 单个整词的相似度：3 字以内必须全对，4 字以上允许一个错字 */
+function wordScore(a, t) {
+  if (t === a) return 1;
+  if (a.length < 3 || t.length < 3) return 0;
+  if (Math.abs(a.length - t.length) > 1) return 0;
+  if (a.length <= 3) return 0;
+  const score = 1 - editDistance(a, t) / Math.max(a.length, t.length);
+  return score >= 0.72 ? score : 0;
+}
+
+function parseTagsFromText(text) {
+  const raw = String(text || '').toUpperCase();
+  const lines = raw.split(/[\r\n]+/);
+  const found = [];
+  lines.forEach((ln, li) => {
+    const toks = [];
+    const re = /[A-Z]+/g;
+    let m;
+    while ((m = re.exec(ln))) toks.push(m[0]);
+    const taggy = /(LV|LY)\s*\.|\+1|\+ 1|%/.test(ln);
+    /* 整行只有一个超长词：多半是 OCR 把空格吞了，按连续字母找 */
+    if (toks.length === 1 && toks[0].length > 12) {
+      const packed = toks[0];
+      TAG_ALIAS.forEach(al => {
+        if (al.w.length < 2) return;
+        if (packed.indexOf(al.w.join('')) >= 0) {
+          found.push({ k:al.k, score:1, line:li, col:0, taggy:true });
+        }
+      });
+      return;
+    }
+    TAG_ALIAS.forEach(al => {
+      const n = al.w.length;
+      for (let i = 0; i + n <= toks.length; i++) {
+        let score = 1;
+        for (let j = 0; j < n; j++) {
+          const s = wordScore(al.w[j], toks[i + j]);
+          if (!s) { score = 0; break; }
+          if (s < score) score = s;
+        }
+        if (score > 0) found.push({ k:al.k, score:score, line:li, col:i, taggy:taggy });
+      }
+    });
+  });
+  const best = {};
+  found.forEach(f => {
+    const cur = best[f.k];
+    if (!cur || f.score > cur.score || (f.score === cur.score && f.line < cur.line)) best[f.k] = f;
+  });
+  return Object.keys(best).map(k => best[k]);
+}
 
 /* 部位关键词：读到装备名就自动判断部位，长词优先（先 CAPE 再 CAP） */
 const SLOT_WORDS = (function () {
@@ -1781,59 +1858,37 @@ function detectSlot(text) {
   return null;
 }
 
-function parseTagsFromText(text) {
-  const n = String(text || '').toUpperCase().replace(/[^A-Z]/g, '');
-  if (!n) return [];
-  const used = new Array(n.length).fill(false);
-  const taken = {};
-  const hits = [];
-  for (let round = 0; round < SCAN_KEY.length; round++) {
-    let best = null;
-    SCAN_KEY.forEach(nm => {
-      if (taken[nm.k]) return;
-      const L = nm.s.length;
-      if (L < 3) return;
-      const need = L <= 3 ? 0.9 : 0.62;
-      const minL = Math.max(3, L - 4);
-      const maxL = Math.min(n.length, L + 4);
-      for (let len = minL; len <= maxL; len++) {
-        for (let i = 0; i + len <= n.length; i++) {
-          let blocked = false;
-          for (let j = i; j < i + len; j++) { if (used[j]) { blocked = true; break; } }
-          if (blocked) continue;
-          const d = editDistance(nm.s, n.substr(i, len));
-          const score = 1 - d / Math.max(L, len);
-          if (score < need) continue;
-          if (!best || score > best.score) best = { k:nm.k, pos:i, len:len, score:score };
-        }
-      }
-    });
-    if (!best) break;
-    taken[best.k] = true;
-    hits.push(best);
-    for (let j = best.pos; j < best.pos + best.len; j++) used[j] = true;
-  }
-  return hits;
-}
-
 function handleOcrText(text, source) {
-  const clean = String(text || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  const raw = String(text || '');
+  const clean = raw.replace(/[\u0000-\u0009\u000b-\u001f]/g, ' ').replace(/[ \t]+/g, ' ').trim();
   SCAN.raw = clean;
   const rawBox = $('#scanRaw');
   if (rawBox) {
     rawBox.hidden = !clean;
     rawBox.textContent = '最后一次识别（' + source + '）：' + (clean || '（空）');
   }
-  const hits = parseTagsFromText(clean);
-  if (hits.length < 3) {
-    scanNote('只读到 ' + hits.length + ' 条词条'
-      + (hits.length ? '（' + hits.map(h => TAGMAP[h.k].name).join('、') + '）' : '')
-      + '，把浮窗停进方框正中再等一秒。');
+  const hits = parseTagsFromText(raw);
+  /* 装备浮窗里的词条一般写成 Lv. +1 / +12%，优先只认这些行，避免把装备名里的职业词当词条 */
+  const taggy = hits.filter(h => h.taggy);
+  const pool = (taggy.length >= 3) ? taggy : hits;
+  if (pool.length < 3) {
+    scanNote('只读到 ' + pool.length + ' 条词条'
+      + (pool.length ? '（' + pool.map(h => TAGMAP[h.k].name).join('、') + '）' : '')
+      + '，把装备浮窗正对着画面再等一秒。');
     return;
   }
-  const best = hits.slice().sort((a, b) => b.score - a.score).slice(0, 3).sort((a, b) => a.pos - b.pos);
+  /* 3 条词条在浮窗里是挨着的：同分时优先挑最紧凑的那一组 */
+  const sorted = pool.slice().sort((a, b) => a.line - b.line || a.col - b.col);
+  let win = null;
+  for (let i = 0; i + 3 <= sorted.length; i++) {
+    const w = sorted.slice(i, i + 3);
+    const rank = w[0].score + w[1].score + w[2].score - (w[2].line - w[0].line) * 0.02;
+    if (!win || rank > win.rank) win = { w:w, rank:rank };
+  }
+  if (!win) return;
+  const best = win.w;
   const minScore = Math.min.apply(null, best.map(h => h.score));
-  const slot = detectSlot(clean);
+  const slot = detectSlot(raw);
   const slotInfo = $('#scanSlotInfo');
   if (slotInfo) slotInfo.textContent = slot ? ('部位：' + slotLabel(slot)) : '部位：未认出（看装备名）';
   addScanRecord({ slot:slot, lines:best.map(h => h.k), score:minScore, source:source });
@@ -1848,37 +1903,52 @@ function fillPick(slot, lines) {
   renderPreview();
 }
 
+/* 批量识别的进度提示 */
+function scanProgress(prefix) {
+  const added = SCAN.records.filter(r => r.added).length;
+  const dup = SCAN.skipped;
+  scanNote((prefix ? prefix + ' ' : '本次共享已录入 ' + added + ' 件'
+    + (dup ? '，跳过重复 ' + dup + ' 次' : '') + '。') + (SCAN.stream ? '继续划过装备，点「停止」结束。' : ''));
+}
+
 function addScanRecord(o) {
   const lines = o.lines.slice();
   const label = lines.map(k => TAGMAP[k].name).join(' / ');
   /* 认不出部位也先把 3 条词条填好，用户点一下上面的部位就能「加入库存」 */
   if (!o.slot) {
     fillPick(null, lines);
-    if (SCAN.auto) scanNote('词条已经填好（' + label + '），但没认出部位：点一下上面的部位，再按「加入库存」。');
-    else scanNote('词条已经填好（' + label + '），但没认出部位：选个部位再按「加入库存」。');
+    scanNote('词条已经填好（' + label + '），但没认出部位：点一下上面的部位，再按「加入库存」。');
+    return;
+  }
+
+  const sig = scanSig(lines);
+  const key = o.slot + '|' + sig;
+  const inInv = (state.inv[o.slot] || []).some(it => scanSig(it.lines) === sig);
+  /* 同一件装备反复划过只留一件，直到换下一件 */
+  if (inInv || SCAN.seen[key]) {
+    SCAN.seen[key] = true;
+    SCAN.skipped++;
+    const slotInfo = $('#scanSlotInfo');
+    if (slotInfo) slotInfo.textContent = '部位：' + slotLabel(o.slot) + '（重复，已跳过）';
+    scanProgress();
     return;
   }
 
   const rec = {
     id: ++SCAN.seq, slot:o.slot, lines:lines,
-    score:o.score, source:o.source, added:false, dup:false, pending:false
+    score:o.score, source:o.source, added:false, pending:false
   };
   SCAN.records.unshift(rec);
   if (SCAN.records.length > 60) SCAN.records.length = 60;
 
-  const sig = scanSig(lines);
-  const list = state.inv[o.slot] || [];
-  if (list.some(it => scanSig(it.lines) === sig)) {
-    rec.dup = true;
-    fillPick(o.slot, lines);
-    scanNote('「' + label + '」' + slotLabel(o.slot) + '里已经有同样的一件，没有重复加入。');
-  } else if (SCAN.auto && o.score >= 0.72) {
+  if (SCAN.auto && o.score >= 0.72) {
     state.inv[o.slot].push({ lines:lines.slice() });
     state.demo = false;
     rec.added = true;
+    SCAN.seen[key] = true;
     state.solIndex = 0;
     state.pick.lines = [];
-    scanNote('已加入库存：' + slotLabel(o.slot) + ' · ' + label);
+    scanProgress('已录入 ' + slotLabel(o.slot) + ' · ' + label + '。');
     renderAll();
   } else {
     rec.pending = true;
@@ -1945,8 +2015,7 @@ function renderScanLog() {
     const flag = el('span', 'flag');
     if (rec.added) { flag.textContent = '已入库'; }
     else if (rec.undo) { flag.textContent = '已撤销'; flag.className = 'flag mute'; }
-    else if (rec.dup) { flag.textContent = '已存在'; flag.className = 'flag mute'; }
-    else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
+    else if (rec.dup) { flag.textContent = '已存在'; flag.className = 'flag mute'; }    else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
     row.appendChild(flag);
 
     if (rec.pending) {
@@ -1971,7 +2040,7 @@ function renderScan() {
   if (region) {
     region.textContent = SCAN.rect
       ? ('区域：宽 ' + Math.round(SCAN.rect.w * 100) + '% · 高 ' + Math.round(SCAN.rect.h * 100) + '%')
-      : '区域：未框选';
+      : '区域：整窗（框选一块会更快更准）';
   }
 }
 
