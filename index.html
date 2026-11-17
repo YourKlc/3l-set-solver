@@ -375,7 +375,8 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
           <div id="scanBody" hidden>
             <p class="mode-note">
               点「开始共享」，在弹出的列表里选游戏窗口（默认停在「窗口」页，游戏要窗口化运行）。共享期间会一直识别你划过的每一件装备，
-              按装备名自动判部位、录入并去重，直到你点「停止」；想更准更快，可以在画面上框一块浮窗区域。第一次用需要联网加载识别引擎。
+              按装备名自动判部位、录入并去重，直到你点「停止」；想更准更快，可以在画面上框一块浮窗区域。
+              一件装备上的词条可能是 1~3 条，认得的按词条记录，认不得的统一记为 Other。第一次用需要联网加载识别引擎。
             </p>
             <div class="inv-tools" style="margin-top:0;border-top:0;padding-top:0">
               <button class="ghost" id="btnScanStart">开始共享</button>
@@ -1750,17 +1751,17 @@ const TAG_ALIAS = [
   { k:'DL',      w:['DIMENSIONAL', 'LEAP'] },
   { k:'WH',      w:['WHITE', 'HOLE'] },
   { k:'REG',     w:['REGISTRY'] },
+  { k:'ATK',     w:['ATTACK', 'POWER', 'MAGIC', 'ATT'] },
+  { k:'ATK',     w:['ATTACK', 'POWER'] },
   { k:'ATK',     w:['ATK'] },
   { k:'BOW',     w:['BOWMAN'] },
-  { k:'CD',      w:['CRIT', 'DMG'] },
   { k:'CD',      w:['CRITICAL', 'DAMAGE'] },
-  { k:'CD',      w:['CRITDMG'] },
-  { k:'CD',      w:['CRITICALDAMAGE'] },
+  { k:'CD',      w:['CRIT', 'DMG'] },
+  { k:'MAGE',    w:['MAGICIAN'] },
   { k:'MAGE',    w:['MAGE'] },
   { k:'PIRATE',  w:['PIRATE'] },
   { k:'THIEF',   w:['THIEF'] },
-  { k:'WARRIOR', w:['WARRIOR'] },
-  { k:'OTHER',   w:['OTHER'] }
+  { k:'WARRIOR', w:['WARRIOR'] }
 ];
 
 /* 单个整词的相似度：3 字以内必须全对，4 字以上允许一个错字 */
@@ -1773,46 +1774,80 @@ function wordScore(a, t) {
   return score >= 0.72 ? score : 0;
 }
 
-function parseTagsFromText(text) {
-  const raw = String(text || '').toUpperCase();
-  const lines = raw.split(/[\r\n]+/);
-  const found = [];
-  lines.forEach((ln, li) => {
-    const toks = [];
-    const re = /[A-Z]+/g;
-    let m;
-    while ((m = re.exec(ln))) toks.push(m[0]);
-    const taggy = /(LV|LY)\s*\.|\+1|\+ 1|%/.test(ln);
-    /* 整行只有一个超长词：多半是 OCR 把空格吞了，按连续字母找 */
-    if (toks.length === 1 && toks[0].length > 12) {
-      const packed = toks[0];
-      TAG_ALIAS.forEach(al => {
-        if (al.w.length < 2) return;
-        if (packed.indexOf(al.w.join('')) >= 0) {
-          found.push({ k:al.k, score:1, line:li, col:0, taggy:true });
-        }
-      });
-      return;
-    }
-    TAG_ALIAS.forEach(al => {
-      const n = al.w.length;
-      for (let i = 0; i + n <= toks.length; i++) {
-        let score = 1;
-        for (let j = 0; j < n; j++) {
-          const s = wordScore(al.w[j], toks[i + j]);
-          if (!s) { score = 0; break; }
-          if (s < score) score = s;
-        }
-        if (score > 0) found.push({ k:al.k, score:score, line:li, col:i, taggy:taggy });
+function tokensOf(ln) {
+  const toks = [];
+  const re = /[A-Z]+/g;
+  let m;
+  while ((m = re.exec(ln))) toks.push(m[0]);
+  return toks;
+}
+
+/* 一行里能对上哪些词条（整词或相邻整词），每个词条只留最高分那处 */
+function matchTagsInLine(ln) {
+  const toks = tokensOf(ln);
+  const hits = [];
+  TAG_ALIAS.forEach(al => {
+    const n = al.w.length;
+    for (let i = 0; i + n <= toks.length; i++) {
+      let score = 1;
+      for (let j = 0; j < n; j++) {
+        const s = wordScore(al.w[j], toks[i + j]);
+        if (!s) { score = 0; break; }
+        if (s < score) score = s;
       }
-    });
+      if (score > 0) hits.push({ k:al.k, score:score, at:i, len:n });
+    }
   });
   const best = {};
-  found.forEach(f => {
-    const cur = best[f.k];
-    if (!cur || f.score > cur.score || (f.score === cur.score && f.line < cur.line)) best[f.k] = f;
+  hits.forEach(h => {
+    const cur = best[h.k];
+    if (!cur || h.score > cur.score) best[h.k] = h;
   });
-  return Object.keys(best).map(k => best[k]);
+  return Object.keys(best).map(k => best[k]).sort((a, b) => a.at - b.at);
+}
+
+/* 这一行像不像装备浮窗里的一条词条：写的是「… Attack Skill Lv. +1 / … Enhancement Skill Lv. +1」，
+   Dimensional Leap / White Hole 不带 Hologram 前缀，按短行判断；一行里挤进两条也会被拆开 */
+function lineIsTagLine(ln, hits) {
+  hits = hits || matchTagsInLine(ln);
+  const toks = tokensOf(ln);
+  if (!toks.length) return false;
+  const num = /\d/.test(ln) || /%/.test(ln);
+  const hasLv = /(LV|LY)\s*\./.test(ln) || /\+ ?1($|[^0-9])/.test(ln) || /%/.test(ln);
+  const skill = /SKILL/.test(ln) && (hasLv || num);
+  if (hits.length >= 2) return true;
+  if (hits.length === 1) {
+    const h = hits[0];
+    if (skill) return true;
+    if (hasLv && !/SCROLL ENHANCEMENT/.test(ln)) return true;
+    if ((h.k === 'DL' || h.k === 'WH') && toks.length <= 4) return true;
+    return false;
+  }
+  /* 认不得的词条行（Other）：写着 Enhancement Skill / Attack Skill 又带等级或数值 */
+  return skill;
+}
+
+/* 把浮窗文字读成这件装备的词条：认得的按词条，认不得的记为 Other，不足 3 条用 Other 补齐 */
+function parseItemTags(text) {
+  const lines = String(text || '').toUpperCase().split(/[\r\n]+/);
+  const rows = [];
+  lines.forEach((ln, li) => {
+    const hits = matchTagsInLine(ln);
+    if (!lineIsTagLine(ln, hits)) return;
+    if (!hits.length) {
+      rows.push({ line:li, at:0, k:'OTHER', score:0.86, text:ln.trim() });
+      return;
+    }
+    hits.forEach((h, i) => {
+      rows.push({ line:li, at:h.at, k:h.k, score:h.score, text:ln.trim() });
+    });
+  });
+  const picked = rows.sort((a, b) => a.line - b.line || a.at - b.at).slice(0, 3);
+  const detected = picked.length;
+  while (picked.length < 3) picked.push({ line:999, at:0, k:'OTHER', score:0.86, text:'' });
+  const lines3 = picked.map(r => r.k);
+  const score = Math.min.apply(null, picked.map(r => r.score));
+  return { lines:lines3, detected:detected, score:score, rows:picked };
 }
 
 /* 部位关键词：读到装备名就自动判断部位，长词优先（先 CAPE 再 CAP） */
@@ -1867,31 +1902,15 @@ function handleOcrText(text, source) {
     rawBox.hidden = !clean;
     rawBox.textContent = '最后一次识别（' + source + '）：' + (clean || '（空）');
   }
-  const hits = parseTagsFromText(raw);
-  /* 装备浮窗里的词条一般写成 Lv. +1 / +12%，优先只认这些行，避免把装备名里的职业词当词条 */
-  const taggy = hits.filter(h => h.taggy);
-  const pool = (taggy.length >= 3) ? taggy : hits;
-  if (pool.length < 3) {
-    scanNote('只读到 ' + pool.length + ' 条词条'
-      + (pool.length ? '（' + pool.map(h => TAGMAP[h.k].name).join('、') + '）' : '')
-      + '，把装备浮窗正对着画面再等一秒。');
-    return;
-  }
-  /* 3 条词条在浮窗里是挨着的：同分时优先挑最紧凑的那一组 */
-  const sorted = pool.slice().sort((a, b) => a.line - b.line || a.col - b.col);
-  let win = null;
-  for (let i = 0; i + 3 <= sorted.length; i++) {
-    const w = sorted.slice(i, i + 3);
-    const rank = w[0].score + w[1].score + w[2].score - (w[2].line - w[0].line) * 0.02;
-    if (!win || rank > win.rank) win = { w:w, rank:rank };
-  }
-  if (!win) return;
-  const best = win.w;
-  const minScore = Math.min.apply(null, best.map(h => h.score));
+  const item = parseItemTags(raw);
   const slot = detectSlot(raw);
   const slotInfo = $('#scanSlotInfo');
   if (slotInfo) slotInfo.textContent = slot ? ('部位：' + slotLabel(slot)) : '部位：未认出（看装备名）';
-  addScanRecord({ slot:slot, lines:best.map(h => h.k), score:minScore, source:source });
+  if (!item.detected) {
+    scanNote('没认出词条行，把装备浮窗正对着画面再等一秒（框一小块区域会更准）。');
+    return;
+  }
+  addScanRecord({ slot:slot, lines:item.lines, detected:item.detected, score:item.score, source:source });
 }
 
 /* --- 填进「加一件装备」这一格 --- */
@@ -1914,10 +1933,12 @@ function scanProgress(prefix) {
 function addScanRecord(o) {
   const lines = o.lines.slice();
   const label = lines.map(k => TAGMAP[k].name).join(' / ');
-  /* 认不出部位也先把 3 条词条填好，用户点一下上面的部位就能「加入库存」 */
+  const detected = (typeof o.detected === 'number') ? o.detected : 3;
+  const padNote = detected < 3 ? '（只读到 ' + detected + ' 条，其余记 Other）' : '';
+  /* 认不出部位也先把词条填好，用户点一下上面的部位就能「加入库存」 */
   if (!o.slot) {
     fillPick(null, lines);
-    scanNote('词条已经填好（' + label + '），但没认出部位：点一下上面的部位，再按「加入库存」。');
+    scanNote('词条已经填好（' + label + '）' + padNote + '，但没认出部位：点一下上面的部位，再按「加入库存」。');
     return;
   }
 
@@ -1935,7 +1956,7 @@ function addScanRecord(o) {
   }
 
   const rec = {
-    id: ++SCAN.seq, slot:o.slot, lines:lines,
+    id: ++SCAN.seq, slot:o.slot, lines:lines, detected:detected,
     score:o.score, source:o.source, added:false, pending:false
   };
   SCAN.records.unshift(rec);
@@ -1948,12 +1969,12 @@ function addScanRecord(o) {
     SCAN.seen[key] = true;
     state.solIndex = 0;
     state.pick.lines = [];
-    scanProgress('已录入 ' + slotLabel(o.slot) + ' · ' + label + '。');
+    scanProgress('已录入 ' + slotLabel(o.slot) + ' · ' + label + padNote);
     renderAll();
   } else {
     rec.pending = true;
     fillPick(o.slot, lines);
-    scanNote('已填好 ' + slotLabel(o.slot) + ' · ' + label
+    scanNote('已填好 ' + slotLabel(o.slot) + ' · ' + label + padNote
       + '（把握 ' + Math.round(o.score * 100) + '%），核对无误按「加入库存」，或点记录里的「入库」。');
   }
   renderScanLog();
@@ -2007,7 +2028,9 @@ function renderScanLog() {
   }
   SCAN.records.forEach(rec => {
     const row = el('div', 'scan-row');
-    row.appendChild(el('span', 'meta', '#' + rec.id + ' · ' + (rec.slot ? slotLabel(rec.slot) : '部位待定')));
+    const metaTxt = '#' + rec.id + ' · ' + (rec.slot ? slotLabel(rec.slot) : '部位待定')
+      + (rec.detected && rec.detected < 3 ? ' · 读到 ' + rec.detected + ' 条' : '');
+    row.appendChild(el('span', 'meta', metaTxt));
     const chips = el('div', 'chips');
     rec.lines.forEach(k => chips.appendChild(chipNode(k, false)));
     row.appendChild(chips);
