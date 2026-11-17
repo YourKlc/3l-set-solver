@@ -313,6 +313,12 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 }
 .scan-row .flag.warn{background:color-mix(in oklab,var(--warn) 16%,var(--panel));color:var(--warn)}
 .scan-row .flag.mute{background:color-mix(in oklab,var(--ink) 7%,var(--panel));color:var(--muted)}
+.scan-row .slot-pick{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 100%}
+.mini{
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:inherit;
+  font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:5px;cursor:pointer;
+}
+.mini:hover{border-color:var(--accent);color:var(--accent)}
 .scan-raw{
   margin-top:10px;border-top:1px solid var(--line);padding-top:10px;
   font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
@@ -470,10 +476,9 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
         <span class="pill" id="scanPill" data-state="zero">未开始</span>
       </div>
       <p class="mode-note">
-        点「开始识别」后，在弹出的窗口列表里选中游戏窗口（游戏要窗口化运行）。把鼠标停在装备上，让 3 条词条的浮窗出现，
-        本页会读出这 3 条词条并存入下面选定的部位。第一次用需要联网加载识别引擎。
+        点「开始识别」后，在弹出的窗口列表里选中游戏窗口（游戏要窗口化运行）。把鼠标停在装备上，让整个浮窗露出来，
+        本页会读出装备名和 3 条词条，按装备名自动判断部位并入库，不用自己选。第一次用需要联网加载识别引擎。
       </p>
-      <div class="slot-tabs" id="scanSlots"></div>
       <div class="inv-tools" style="margin-top:0;border-top:0;padding-top:0">
         <button class="primary" id="btnScanStart" style="width:auto;padding:8px 16px">开始识别</button>
         <button class="ghost" id="btnScanStop" disabled>停止</button>
@@ -484,10 +489,11 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
         <video id="scanVideo" autoplay muted playsinline class="scan-video"></video>
         <canvas id="scanCanvas" hidden></canvas>
         <div class="scan-rect" id="scanRect"></div>
-        <p class="empty" id="scanHint">还没连接窗口。开始识别后，在画面上按住鼠标拖出一个方框，罩住装备浮窗的 3 行词条。</p>
+        <p class="empty" id="scanHint">还没连接窗口。开始识别后，在画面上按住鼠标拖出一个方框，罩住整个装备浮窗（装备名 + 3 行词条）。</p>
       </div>
       <div class="scan-bar">
         <span class="hint" id="scanRegion">区域：未框选</span>
+        <span class="hint" id="scanSlotInfo">部位：自动识别</span>
         <span class="hint" id="scanEngine">识别引擎：未加载</span>
       </div>
       <p class="mode-note" id="scanNote"></p>
@@ -506,7 +512,7 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
       <div class="card-head"><h2>用截图识别</h2><span class="pill" id="scanShotPill" data-state="zero">—</span></div>
       <p class="mode-note">
         不方便共享窗口时，把装备浮窗的截图拖到下面，或者点「选择截图」、直接在页面里 Ctrl+V 粘贴。
-        截图最好只留浮窗那一块，读出来的 3 条词条同样会存进上面选定的部位。
+        截图最好带上装备名那一行，读出来的 3 条词条同样会按装备名自动存进对应部位。
       </p>
       <div class="scan-drop" id="scanDrop">把截图拖到这里，或按 Ctrl+V 粘贴</div>
       <input type="file" id="scanFile" accept="image/*" hidden>
@@ -1568,17 +1574,30 @@ async function ensureWorker() {
 }
 
 /* --- 窗口共享 --- */
+async function grabGameWindow() {
+  /* displaySurface 是给选择器的提示：让它默认停在「窗口 / 程序」这一页 */
+  try {
+    return await navigator.mediaDevices.getDisplayMedia({
+      video:{ displaySurface:'window', frameRate:{ ideal:12, max:20 } }, audio:false
+    });
+  } catch (e) {
+    /* 用户自己取消就别再弹一次；只是这个提示不被支持时才退回普通参数 */
+    if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) throw e;
+    return navigator.mediaDevices.getDisplayMedia({
+      video:{ frameRate:{ ideal:12, max:20 } }, audio:false
+    });
+  }
+}
+
 async function startScan() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
     scanNote('这个浏览器不支持共享窗口，请用 Chrome / Edge，或改用下面的截图识别。');
     return;
   }
   setScanPill('选择窗口…', 'part');
-  scanNote('在弹出的窗口列表里选中游戏窗口。');
+  scanNote('在弹出的列表里选中游戏窗口（默认就停在「窗口」这一页）。');
   try {
-    SCAN.stream = await navigator.mediaDevices.getDisplayMedia({
-      video:{ frameRate:{ ideal:12, max:20 } }, audio:false
-    });
+    SCAN.stream = await grabGameWindow();
   } catch (e) {
     SCAN.stream = null;
     setScanPill('未开始', 'zero');
@@ -1597,7 +1616,7 @@ async function startScan() {
   $('#btnScanStart').disabled = true;
   $('#btnScanRect').disabled = false;
   setScanPill('运行中', 'ok');
-  scanNote(SCAN.rect ? '正在识别，把浮窗停进方框里。' : '在画面上拖一个方框，罩住装备浮窗的 3 行词条。');
+  scanNote(SCAN.rect ? '正在识别，把浮窗停进方框里。' : '在画面上拖一个方框，罩住整个装备浮窗（装备名 + 3 行词条）。');
 
   const track = SCAN.stream.getVideoTracks()[0];
   if (track) track.onended = stopScan;
@@ -1714,6 +1733,50 @@ function editDistance(a, b) {
 }
 
 const SCAN_KEY = TAGS.map(t => ({ k:t.k, s:t.name.toUpperCase().replace(/[^A-Z]/g, '') }));
+
+/* 部位关键词：读到装备名就自动判断部位，长词优先（先 CAPE 再 CAP） */
+const SLOT_WORDS = (function () {
+  const src = {
+    hat:    ['headwear', 'helmet', 'bandana', 'circlet', 'beret', 'crown', 'hat', 'cap'],
+    top:    ['overall', 'jacket', 'shirt', 'coat', 'vest', 'top'],
+    bottom: ['trousers', 'bottom', 'pants', 'skirt', 'shorts'],
+    cape:   ['mantle', 'cloak', 'cape'],
+    glove:  ['gauntlet', 'gloves', 'glove', 'mitten'],
+    shoe:   ['sneakers', 'sneaker', 'boots', 'shoes', 'boot', 'shoe', 'sandal']
+  };
+  const list = [];
+  Object.keys(src).forEach(k => src[k].forEach(w => {
+    const W = w.toUpperCase();
+    list.push({ k:k, w:W, re:new RegExp('(^| )' + W + '(S|ES)?($| )') });
+  }));
+  return list.sort((a, b) => b.w.length - a.w.length);
+})();
+
+function detectSlot(text) {
+  const raw = String(text || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  const packed = raw.replace(/[^A-Z]/g, '');
+  if (!packed) return null;
+  /* 分隔词边界优先，避免 WHAT 里的 HAT、TRAP 里的 CAP */
+  for (let i = 0; i < SLOT_WORDS.length; i++) {
+    if (SLOT_WORDS[i].re.test(' ' + raw + ' ')) return SLOT_WORDS[i].k;
+  }
+  /* 单词被 OCR 粘在一起时退化为连续字母查找，长词优先 */
+  for (let i = 0; i < SLOT_WORDS.length; i++) {
+    const it = SLOT_WORDS[i];
+    if (it.w.length >= 5 && packed.indexOf(it.w) >= 0) return it.k;
+  }
+  /* 再容忍一个错字 */
+  for (let i = 0; i < SLOT_WORDS.length; i++) {
+    const it = SLOT_WORDS[i];
+    const L = it.w.length;
+    if (L < 6) continue;
+    for (let s = 0; s + L <= packed.length; s++) {
+      if (editDistance(it.w, packed.substr(s, L)) <= 1) return it.k;
+    }
+  }
+  return null;
+}
+
 function parseTagsFromText(text) {
   const n = String(text || '').toUpperCase().replace(/[^A-Z]/g, '');
   if (!n) return [];
@@ -1766,24 +1829,32 @@ function handleOcrText(text, source) {
   }
   const best = hits.slice().sort((a, b) => b.score - a.score).slice(0, 3).sort((a, b) => a.pos - b.pos);
   const minScore = Math.min.apply(null, best.map(h => h.score));
-  addScanRecord({ slot:SCAN.slot, lines:best.map(h => h.k), score:minScore, source:source });
+  const slot = detectSlot(clean);
+  const slotInfo = $('#scanSlotInfo');
+  if (slotInfo) slotInfo.textContent = slot ? ('部位：' + slotLabel(slot)) : '部位：未认出（看装备名）';
+  addScanRecord({ slot:slot, lines:best.map(h => h.k), score:minScore, source:source });
 }
 
 /* --- 入库 / 撤销 --- */
 function addScanRecord(o) {
-  const sig = scanSig(o.lines);
-  const list = state.inv[o.slot] || [];
-  const dup = list.some(it => scanSig(it.lines) === sig);
   const rec = {
-    id: ++SCAN.seq, slot:o.slot, lines:o.lines.slice(),
-    score:o.score, source:o.source, added:false, dup:dup, pending:false
+    id: ++SCAN.seq, slot:o.slot || null, lines:o.lines.slice(),
+    score:o.score, source:o.source, added:false, dup:false, pending:false, needSlot:!o.slot
   };
   SCAN.records.unshift(rec);
   if (SCAN.records.length > 60) SCAN.records.length = 60;
 
   const label = o.lines.map(k => TAGMAP[k].name).join(' / ');
-  if (dup) {
-    scanNote('「' + label + '」库存里已经有同样的一件，跳过。');
+  if (!o.slot) {
+    scanNote('词条读出来了（' + label + '），但没认出部位。把框再往上拉一点，让装备名那一行也进方框。');
+    renderScanLog();
+    return;
+  }
+  const sig = scanSig(o.lines);
+  const list = state.inv[o.slot] || [];
+  if (list.some(it => scanSig(it.lines) === sig)) {
+    rec.dup = true;
+    scanNote('「' + label + '」' + slotLabel(o.slot) + '里已经有同样的一件，跳过。');
   } else if (SCAN.auto && o.score >= 0.72) {
     state.inv[o.slot].push({ lines:o.lines.slice() });
     state.demo = false;
@@ -1803,9 +1874,35 @@ function slotLabel(key) {
   return s ? s.label : key;
 }
 
+/* 部位没认出来时，点一下部位即入库 */
+function assignScanSlot(id, key) {
+  const rec = SCAN.records.filter(r => r.id === id)[0];
+  if (!rec || rec.added || !key) return;
+  const sig = scanSig(rec.lines);
+  const list = state.inv[key] || [];
+  if (list.some(it => scanSig(it.lines) === sig)) {
+    rec.slot = key;
+    rec.needSlot = false;
+    rec.dup = true;
+    scanNote(slotLabel(key) + '里已经有同样的一件，跳过。');
+    renderScanLog();
+    return;
+  }
+  rec.slot = key;
+  rec.needSlot = false;
+  state.inv[key].push({ lines:rec.lines.slice() });
+  state.demo = false;
+  rec.added = true;
+  state.solIndex = 0;
+  const slotInfo = $('#scanSlotInfo');
+  if (slotInfo) slotInfo.textContent = '部位：' + slotLabel(key);
+  scanNote('已存入' + slotLabel(key) + '：' + rec.lines.map(k => TAGMAP[k].name).join(' / '));
+  renderAll();
+}
+
 function acceptScanRecord(id) {
   const rec = SCAN.records.filter(r => r.id === id)[0];
-  if (!rec || rec.added) return;
+  if (!rec || rec.added || !rec.slot) return;
   state.inv[rec.slot].push({ lines:rec.lines.slice() });
   state.demo = false;
   rec.pending = false;
@@ -1831,23 +1928,6 @@ function undoScanRecord(id) {
 }
 
 /* --- 渲染 --- */
-function renderScanSlots() {
-  const box = $('#scanSlots');
-  if (!box) return;
-  box.innerHTML = '';
-  SLOTS.forEach(s => {
-    const btn = el('button', 'slot-tab', s.label);
-    btn.dataset.active = (SCAN.slot === s.key) ? '1' : '0';
-    btn.appendChild(el('span', 'cnt', String((state.inv[s.key] || []).length)));
-    btn.onclick = () => {
-      SCAN.slot = s.key;
-      renderScanSlots();
-      scanNote('入库部位改成' + s.label + '。');
-    };
-    box.appendChild(btn);
-  });
-}
-
 function renderScanLog() {
   const box = $('#scanLog');
   if (!box) return;
@@ -1855,7 +1935,7 @@ function renderScanLog() {
   const logPill = $('#scanLogPill');
   if (logPill) {
     logPill.textContent = SCAN.records.filter(r => r.added).length + ' 件已入库';
-    logPill.dataset.state = SCAN.records.some(r => r.pending) ? 'part' : (SCAN.records.length ? 'ok' : 'zero');
+    logPill.dataset.state = SCAN.records.some(r => r.pending || r.needSlot) ? 'part' : (SCAN.records.length ? 'ok' : 'zero');
   }
   if (!SCAN.records.length) {
     box.appendChild(el('p', 'empty', '还没有识别记录。连上窗口后，每读到一件装备就会出现在这里。'));
@@ -1863,7 +1943,7 @@ function renderScanLog() {
   }
   SCAN.records.forEach(rec => {
     const row = el('div', 'scan-row');
-    row.appendChild(el('span', 'meta', '#' + rec.id + ' · ' + slotLabel(rec.slot)));
+    row.appendChild(el('span', 'meta', '#' + rec.id + ' · ' + (rec.slot ? slotLabel(rec.slot) : '部位待定')));
     const chips = el('div', 'chips');
     rec.lines.forEach(k => chips.appendChild(chipNode(k, false)));
     row.appendChild(chips);
@@ -1872,9 +1952,19 @@ function renderScanLog() {
     if (rec.added) { flag.textContent = '已入库'; }
     else if (rec.undo) { flag.textContent = '已撤销'; flag.className = 'flag mute'; }
     else if (rec.dup) { flag.textContent = '已存在'; flag.className = 'flag mute'; }
+    else if (rec.needSlot) { flag.textContent = '选个部位'; flag.className = 'flag warn'; }
     else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
     row.appendChild(flag);
 
+    if (rec.needSlot) {
+      const pick = el('div', 'slot-pick');
+      SLOTS.forEach(s => {
+        const b = el('button', 'mini', s.label);
+        b.onclick = () => assignScanSlot(rec.id, s.key);
+        pick.appendChild(b);
+      });
+      row.appendChild(pick);
+    }
     if (rec.pending) {
       const okBtn = el('button', 'ghost', '入库');
       okBtn.onclick = () => acceptScanRecord(rec.id);
@@ -1890,7 +1980,6 @@ function renderScanLog() {
 }
 
 function renderScan() {
-  renderScanSlots();
   renderScanLog();
   const autoBox = $('#scanAuto');
   if (autoBox) autoBox.checked = SCAN.auto;
