@@ -1533,7 +1533,7 @@ const SCAN = {
   lastHash:'', lastAt:0, busy:false,
   records:[], seq:0, raw:'',
   seen:Object.create(null), skipped:0, diag:[],
-  prevGrid:null, lastBox:null, queue:[]
+  prevGrid:null, lastBox:null, queue:[], holdUntil:0, missCount:0
 };
 
 function scanSig(lines) { return lines.slice().sort().join('|'); }
@@ -1686,6 +1686,8 @@ async function startScan() {
   SCAN.prevGrid = null;
   SCAN.lastBox = null;
   SCAN.queue = [];
+  SCAN.holdUntil = 0;
+  SCAN.missCount = 0;
   scanNote(SCAN.rect
     ? '正在识别，把装备浮窗停在方框里；划过的每一件都会自动录入，重复的会跳过。'
     : '整窗识别中：划过一件装备就会录入一件，重复的会跳过，直到你点「停止」。框选一块浮窗区域会更快更准。');
@@ -1727,6 +1729,8 @@ function stopScan() {
   if (SCAN.raf) { cancelAnimationFrame(SCAN.raf); SCAN.raf = null; }
   if (SCAN.timer) { clearInterval(SCAN.timer); SCAN.timer = null; }
   SCAN.queue = [];
+  SCAN.holdUntil = 0;
+  SCAN.missCount = 0;
   $('#btnScanStop').disabled = true;
   $('#btnScanStart').disabled = false;
   $('#btnScanRect').disabled = true;
@@ -1882,16 +1886,43 @@ function leftOfSecondPanel(c, words) {
   return out;
 }
 
-/* 截取和识别分开：每 600ms 先把刚出现的浮窗「拍」进队列，OCR 慢慢按顺序读，
-   这样连续划过几件也不会因为识别慢而漏掉 */
+/* 截取和识别分开：采集按固定节拍「拍」当前浮窗，内容变了才进队列让 OCR 读。
+   一次 OCR 要一秒多，采集不等它，所以连续划过多件也不漏。 */
 function enqueueCrop(c) {
   const h = hashCanvas(c);
   if (h === SCAN.lastHash) return false;
   SCAN.lastHash = h;
-  if (SCAN.queue.length > 8) SCAN.queue.shift();
+  if (SCAN.queue.length > 6) SCAN.queue.shift();
   SCAN.queue.push({ canvas:c, at:Date.now() });
   dlog('拍下浮窗 ' + c.width + 'x' + c.height + '，队列 ' + SCAN.queue.length);
   return true;
+}
+
+/* 按坐标取一块画面（定点持续监视用） */
+function cropBox(b) {
+  const canvas = $('#scanCanvas');
+  if (!canvas || !canvas.width || !b) return null;
+  const x0 = Math.max(0, b.x), y0 = Math.max(0, b.y);
+  const w = Math.min(canvas.width - x0, b.w), h = Math.min(canvas.height - y0, b.h);
+  if (w < 160 || h < 160) return null;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  c.getContext('2d').drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
+  return c;
+}
+
+/* 一次采集：框选就按框读；否则先找刚变化的浮窗，没变化但已锁定区域就按定点读 */
+function captureOnce() {
+  if (!SCAN.stream || !SCAN.panelOpen || state.page !== 'solve') return;
+  let c = null;
+  if (SCAN.rect) {
+    c = cropCanvas();
+  } else {
+    c = autoCrop();
+    if (!c && SCAN.lastBox && Date.now() < SCAN.holdUntil) c = cropBox(SCAN.lastBox);
+  }
+  if (c) enqueueCrop(c);
 }
 
 function ocrTick() {
@@ -1902,16 +1933,7 @@ function ocrTick() {
       dlog('引擎初始化失败：' + ((e && e.message) || e));
     });
   }
-  /* 1) 截帧（很快）：框选时按框读，否则自动找刚出现的浮窗 */
-  if (!SCAN.busy || SCAN.queue.length < 8) {
-    if (SCAN.rect) {
-      const c = cropCanvas();
-      if (c) enqueueCrop(c);
-    } else {
-      const c = autoCrop();
-      if (c) enqueueCrop(c);
-    }
-  }
+  captureOnce();
   pumpOcr();
 }
 
@@ -1934,6 +1956,14 @@ async function pumpOcr() {
     }
     dlog('OCR ' + job.canvas.width + 'x' + job.canvas.height + note + ' 读到 '
       + String(txt || '').replace(/\s+/g, ' ').trim().slice(0, 90));
+    /* 读到装备名就锁定这块浮窗继续盯着，连续两次读不到就放开 */
+    if (/SUPERCHARGED|HOLOGRAM|LIBAE/i.test(txt || '')) {
+      SCAN.missCount = 0;
+      SCAN.holdUntil = Date.now() + 5000;
+    } else {
+      SCAN.missCount++;
+      if (SCAN.missCount >= 2) { SCAN.holdUntil = 0; SCAN.missCount = 0; }
+    }
     handleOcrText(txt, '窗口');
   } catch (e) {
     scanNote('识别出错：' + ((e && e.message) || e));
@@ -1941,7 +1971,8 @@ async function pumpOcr() {
   } finally {
     SCAN.busy = false;
     setScanPill(SCAN.stream ? '运行中' : '已停止', SCAN.stream ? 'ok' : 'zero');
-    if (SCAN.queue.length) pumpOcr();
+    /* 一次识别一块，读完后稍歇再取下一块，别把 CPU 全占满让人物卡住 */
+    if (SCAN.queue.length) setTimeout(pumpOcr, 250);
   }
 }
 
