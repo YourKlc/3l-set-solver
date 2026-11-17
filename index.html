@@ -280,6 +280,44 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 .field-row input:disabled{background:var(--sunk);color:var(--muted);cursor:not-allowed}
 .field-row input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
 .hint{font-size:12px;color:var(--muted);align-self:center}
+
+/* ===== 识别录入 ===== */
+.scan-stage{
+  position:relative;margin-top:12px;border:1px solid var(--line);border-radius:8px;
+  background:var(--sunk);overflow:hidden;min-height:180px;
+}
+.scan-stage canvas{display:block;width:100%;height:auto;cursor:crosshair;touch-action:none}
+.scan-stage .empty{margin:0;padding:40px 16px;text-align:center}
+.scan-video{position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+.scan-rect{
+  position:absolute;display:none;pointer-events:none;border:2px solid var(--accent);
+  background:color-mix(in oklab,var(--accent) 10%,transparent);border-radius:3px;
+}
+.scan-bar{display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:space-between;margin-top:8px}
+.scan-drop{
+  margin-top:10px;border:1px dashed var(--line);border-radius:8px;padding:20px 16px;text-align:center;
+  font-size:12.5px;color:var(--muted);background:var(--sunk);cursor:pointer;
+  transition:border-color .15s,color .15s;
+}
+.scan-drop:hover{border-color:var(--muted);color:var(--ink)}
+.scan-drop[data-over="1"]{border-color:var(--accent);color:var(--ink);background:color-mix(in oklab,var(--accent) 8%,var(--panel))}
+.scan-row{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-bottom:6px;background:var(--sunk);
+}
+.scan-row .meta{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.scan-row .chips{flex:1 1 200px}
+.scan-row .flag{
+  flex:0 0 auto;font-size:11px;font-weight:600;border-radius:999px;padding:1px 8px;
+  background:color-mix(in oklab,var(--ok) 16%,var(--panel));color:var(--ok);
+}
+.scan-row .flag.warn{background:color-mix(in oklab,var(--warn) 16%,var(--panel));color:var(--warn)}
+.scan-row .flag.mute{background:color-mix(in oklab,var(--ink) 7%,var(--panel));color:var(--muted)}
+.scan-raw{
+  margin-top:10px;border-top:1px solid var(--line);padding-top:10px;
+  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
+  max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+}
 </style>
 </head>
 <body>
@@ -421,6 +459,60 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
         <b>多套搭配</b>：「五职业」是默认搭配，不能改名、不能删；点「＋ 新增搭配」会复制当前这套的条数，另存为一套新的，
         名称和备注都能随时改，也可以删掉。切换搭配在目标卡上方的标签页里点，两页的标签是同一套。
       </p>
+    </section>
+  </div>
+
+  <!-- ===== 视图：识别录入 ===== -->
+  <div id="viewScan" hidden>
+    <section class="card">
+      <div class="card-head">
+        <h2>窗口识别<span id="scanSub"></span></h2>
+        <span class="pill" id="scanPill" data-state="zero">未开始</span>
+      </div>
+      <p class="mode-note">
+        点「开始识别」后，在弹出的窗口列表里选中游戏窗口（游戏要窗口化运行）。把鼠标停在装备上，让 3 条词条的浮窗出现，
+        本页会读出这 3 条词条并存入下面选定的部位。第一次用需要联网加载识别引擎。
+      </p>
+      <div class="slot-tabs" id="scanSlots"></div>
+      <div class="inv-tools" style="margin-top:0;border-top:0;padding-top:0">
+        <button class="primary" id="btnScanStart" style="width:auto;padding:8px 16px">开始识别</button>
+        <button class="ghost" id="btnScanStop" disabled>停止</button>
+        <button class="ghost" id="btnScanRect" disabled>重新框选</button>
+        <span class="hint"><input type="checkbox" id="scanAuto" checked> 读到 3 条就自动入库</span>
+      </div>
+      <div class="scan-stage" id="scanStage">
+        <video id="scanVideo" autoplay muted playsinline class="scan-video"></video>
+        <canvas id="scanCanvas" hidden></canvas>
+        <div class="scan-rect" id="scanRect"></div>
+        <p class="empty" id="scanHint">还没连接窗口。开始识别后，在画面上按住鼠标拖出一个方框，罩住装备浮窗的 3 行词条。</p>
+      </div>
+      <div class="scan-bar">
+        <span class="hint" id="scanRegion">区域：未框选</span>
+        <span class="hint" id="scanEngine">识别引擎：未加载</span>
+      </div>
+      <p class="mode-note" id="scanNote"></p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>识别记录<span id="scanLogSub"></span></h2>
+        <span class="pill" id="scanLogPill" data-state="zero">0 件</span>
+      </div>
+      <div id="scanLog"></div>
+      <div class="scan-raw" id="scanRaw" hidden></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>用截图识别</h2><span class="pill" id="scanShotPill" data-state="zero">—</span></div>
+      <p class="mode-note">
+        不方便共享窗口时，把装备浮窗的截图拖到下面，或者点「选择截图」、直接在页面里 Ctrl+V 粘贴。
+        截图最好只留浮窗那一块，读出来的 3 条词条同样会存进上面选定的部位。
+      </p>
+      <div class="scan-drop" id="scanDrop">把截图拖到这里，或按 Ctrl+V 粘贴</div>
+      <input type="file" id="scanFile" accept="image/*" hidden>
+      <div class="inv-tools">
+        <button class="ghost" id="btnScanShot">选择截图</button>
+      </div>
     </section>
   </div>
 
@@ -677,7 +769,7 @@ function save() {
 /* 把一份存档数据装进 state（load 与导入共用） */
 function applyStore(d) {
   state.inv = normalizeInv(d.inv);
-  state.page = (d.page === 'custom') ? 'custom' : 'solve';
+  state.page = (d.page === 'custom' || d.page === 'scan') ? d.page : 'solve';
   state.demo = !!d.demo;
 
   if (Array.isArray(d.presets) && d.presets.length) {
@@ -727,7 +819,8 @@ function renderPage() {
   box.innerHTML = '';
   const pages = [
     { k:'solve',  label:'求解器' },
-    { k:'custom', label:'毕业词条' }
+    { k:'custom', label:'毕业词条' },
+    { k:'scan',   label:'识别录入' }
   ];
   pages.forEach(p => {
     const btn = el('button', 'tab', p.label);
@@ -741,6 +834,7 @@ function renderPage() {
   });
   $('#viewSolve').hidden = (state.page !== 'solve');
   $('#viewCustom').hidden = (state.page !== 'custom');
+  $('#viewScan').hidden = (state.page !== 'scan');
 }
 
 /* ===== 渲染：搭配标签（求解器页）===== */
@@ -1334,6 +1428,7 @@ function renderAll() {
   renderResult();
   renderUsability();
   renderCustom();
+  renderScan();
   save();
 }
 
@@ -1394,6 +1489,545 @@ function importJson(file) {
   reader.readAsText(file, 'utf-8');
 }
 
+/* ===== 识别录入：窗口共享 + OCR ===== */
+const OCR_CDN = {
+  script:'https://fastly.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+  worker:'https://fastly.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+  core:'https://fastly.jsdelivr.net/npm/tesseract.js-core@5.1.0',
+  lang:'https://fastly.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int'
+};
+const SCAN = {
+  stream:null, raf:null, timer:null, drawing:false,
+  rect:null, drag:null,
+  slot:'hat', auto:true,
+  worker:null, loading:null,
+  lastHash:'', lastAt:0, busy:false,
+  records:[], seq:0, raw:''
+};
+
+function scanSig(lines) { return lines.slice().sort().join('|'); }
+function scanNote(text) {
+  const n = $('#scanNote');
+  if (n) n.textContent = text || '';
+}
+function setScanPill(text, st) {
+  const p = $('#scanPill');
+  if (!p) return;
+  p.textContent = text;
+  p.dataset.state = st || 'zero';
+}
+function setEngine(text) {
+  const n = $('#scanEngine');
+  if (n) n.textContent = '识别引擎：' + text;
+}
+
+/* --- 识别引擎（点开始时才联网加载，页面本身仍可离线用） --- */
+function loadOcrScript() {
+  if (window.Tesseract) return Promise.resolve();
+  if (SCAN.loading) return SCAN.loading;
+  SCAN.loading = new Promise((resolve, reject) => {
+    let settled = false;
+    const s = document.createElement('script');
+    s.src = OCR_CDN.script;
+    s.onload = () => { if (!settled) { settled = true; resolve(); } };
+    s.onerror = () => { if (!settled) { settled = true; SCAN.loading = null; reject(new Error('识别引擎下载失败，请联网后重试')); } };
+    document.head.appendChild(s);
+    setTimeout(() => {
+      if (!settled) { settled = true; SCAN.loading = null; reject(new Error('识别引擎加载超时，请检查网络')); }
+    }, 30000);
+  });
+  return SCAN.loading;
+}
+
+async function ensureWorker() {
+  if (SCAN.worker) return SCAN.worker;
+  setEngine('加载中…');
+  await loadOcrScript();
+  if (!window.Tesseract) throw new Error('识别引擎不可用');
+  const worker = await Tesseract.createWorker('eng', 1, {
+    workerPath: OCR_CDN.worker,
+    corePath: OCR_CDN.core,
+    langPath: OCR_CDN.lang,
+    logger: m => {
+      if (m && m.status === 'loading language traineddata') {
+        setEngine('加载语言包 ' + Math.round((m.progress || 0) * 100) + '%');
+      } else if (m && m.status === 'initializing api') {
+        setEngine('初始化…');
+      }
+    }
+  });
+  try {
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+%.: ',
+      preserve_interword_spaces: '1'
+    });
+  } catch (e) { /* 个别版本不支持就跳过 */ }
+  SCAN.worker = worker;
+  setEngine('就绪');
+  return worker;
+}
+
+/* --- 窗口共享 --- */
+async function startScan() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    scanNote('这个浏览器不支持共享窗口，请用 Chrome / Edge，或改用下面的截图识别。');
+    return;
+  }
+  setScanPill('选择窗口…', 'part');
+  scanNote('在弹出的窗口列表里选中游戏窗口。');
+  try {
+    SCAN.stream = await navigator.mediaDevices.getDisplayMedia({
+      video:{ frameRate:{ ideal:12, max:20 } }, audio:false
+    });
+  } catch (e) {
+    SCAN.stream = null;
+    setScanPill('未开始', 'zero');
+    scanNote('没能共享窗口（' + ((e && e.name) || 'Error') + '）。可以再点一次，或者改用截图识别。');
+    return;
+  }
+
+  const video = $('#scanVideo');
+  const canvas = $('#scanCanvas');
+  video.srcObject = SCAN.stream;
+  try { await video.play(); } catch (e) { /* 静音 autoplay 一般不会失败 */ }
+  canvas.hidden = false;
+  $('#scanHint').hidden = true;
+  $('#scanRect').style.display = SCAN.rect ? 'block' : 'none';
+  $('#btnScanStop').disabled = false;
+  $('#btnScanStart').disabled = true;
+  $('#btnScanRect').disabled = false;
+  setScanPill('运行中', 'ok');
+  scanNote(SCAN.rect ? '正在识别，把浮窗停进方框里。' : '在画面上拖一个方框，罩住装备浮窗的 3 行词条。');
+
+  const track = SCAN.stream.getVideoTracks()[0];
+  if (track) track.onended = stopScan;
+
+  if (SCAN.raf) cancelAnimationFrame(SCAN.raf);
+  let last = 0;
+  const paint = ts => {
+    if (!SCAN.stream) return;
+    if (ts - last > 60) {
+      last = ts;
+      if (video.videoWidth && canvas.width !== video.videoWidth) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      if (canvas.width) canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
+    SCAN.raf = requestAnimationFrame(paint);
+  };
+  SCAN.raf = requestAnimationFrame(paint);
+
+  if (SCAN.timer) clearInterval(SCAN.timer);
+  SCAN.timer = setInterval(ocrTick, 600);
+
+  try { ensureWorker(); } catch (e) { /* 错误在 ocrTick 里统一提示 */ }
+}
+
+function stopScan() {
+  if (SCAN.stream) {
+    SCAN.stream.getTracks().forEach(t => t.stop());
+    SCAN.stream = null;
+  }
+  if (SCAN.raf) { cancelAnimationFrame(SCAN.raf); SCAN.raf = null; }
+  if (SCAN.timer) { clearInterval(SCAN.timer); SCAN.timer = null; }
+  $('#btnScanStop').disabled = true;
+  $('#btnScanStart').disabled = false;
+  $('#btnScanRect').disabled = true;
+  setScanPill('已停止', 'zero');
+  scanNote('已停止共享窗口，已识别到的装备都留在库存里。');
+}
+
+/* --- 截取区域 / 变化检测 --- */
+function cropCanvas() {
+  const video = $('#scanVideo');
+  if (!SCAN.rect || !video.videoWidth) return null;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const sx = Math.round(SCAN.rect.x * vw);
+  const sy = Math.round(SCAN.rect.y * vh);
+  const sw = Math.max(8, Math.round(SCAN.rect.w * vw));
+  const sh = Math.max(8, Math.round(SCAN.rect.h * vh));
+  const c = document.createElement('canvas');
+  c.width = Math.min(sw, vw - sx);
+  c.height = Math.min(sh, vh - sy);
+  const g = c.getContext('2d');
+  g.drawImage(video, sx, sy, c.width, c.height, 0, 0, c.width, c.height);
+  return c;
+}
+
+function hashCanvas(c) {
+  const t = document.createElement('canvas');
+  t.width = 24; t.height = 10;
+  const g = t.getContext('2d');
+  g.drawImage(c, 0, 0, 24, 10);
+  let d;
+  try { d = g.getImageData(0, 0, 24, 10).data; } catch (e) { return String(Date.now()); }
+  let h = '';
+  for (let i = 0; i < d.length; i += 4) {
+    h += ((d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) >> 4) & 15;
+  }
+  return h;
+}
+
+async function ocrTick() {
+  if (!SCAN.stream || SCAN.busy || !SCAN.rect || state.page !== 'scan') return;
+  if (!SCAN.worker) {
+    try { await ensureWorker(); } catch (e) { setEngine('不可用（需要联网）'); return; }
+  }
+  const c = cropCanvas();
+  if (!c) return;
+  const hash = hashCanvas(c);
+  if (hash === SCAN.lastHash && Date.now() - SCAN.lastAt < 4000) return;
+  SCAN.lastHash = hash;
+  SCAN.lastAt = Date.now();
+  SCAN.busy = true;
+  setScanPill('识别中', 'part');
+  try {
+    const r = await SCAN.worker.recognize(c);
+    handleOcrText(r.data.text, '窗口');
+  } catch (e) {
+    scanNote('识别出错：' + ((e && e.message) || e));
+  } finally {
+    SCAN.busy = false;
+    setScanPill(SCAN.stream ? '运行中' : '已停止', SCAN.stream ? 'ok' : 'zero');
+  }
+}
+
+/* --- 文本 → 词条 --- */
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = new Array(n + 1);
+  let cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      const del = prev[j] + 1, ins = cur[j - 1] + 1, sub = prev[j - 1] + cost;
+      cur[j] = del < ins ? (del < sub ? del : sub) : (ins < sub ? ins : sub);
+    }
+    const tmp = prev; prev = cur; cur = tmp;
+  }
+  return prev[n];
+}
+
+const SCAN_KEY = TAGS.map(t => ({ k:t.k, s:t.name.toUpperCase().replace(/[^A-Z]/g, '') }));
+function parseTagsFromText(text) {
+  const n = String(text || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (!n) return [];
+  const used = new Array(n.length).fill(false);
+  const taken = {};
+  const hits = [];
+  for (let round = 0; round < SCAN_KEY.length; round++) {
+    let best = null;
+    SCAN_KEY.forEach(nm => {
+      if (taken[nm.k]) return;
+      const L = nm.s.length;
+      if (L < 3) return;
+      const need = L <= 3 ? 0.9 : 0.62;
+      const minL = Math.max(3, L - 4);
+      const maxL = Math.min(n.length, L + 4);
+      for (let len = minL; len <= maxL; len++) {
+        for (let i = 0; i + len <= n.length; i++) {
+          let blocked = false;
+          for (let j = i; j < i + len; j++) { if (used[j]) { blocked = true; break; } }
+          if (blocked) continue;
+          const d = editDistance(nm.s, n.substr(i, len));
+          const score = 1 - d / Math.max(L, len);
+          if (score < need) continue;
+          if (!best || score > best.score) best = { k:nm.k, pos:i, len:len, score:score };
+        }
+      }
+    });
+    if (!best) break;
+    taken[best.k] = true;
+    hits.push(best);
+    for (let j = best.pos; j < best.pos + best.len; j++) used[j] = true;
+  }
+  return hits;
+}
+
+function handleOcrText(text, source) {
+  const clean = String(text || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim();
+  SCAN.raw = clean;
+  const rawBox = $('#scanRaw');
+  if (rawBox) {
+    rawBox.hidden = !clean;
+    rawBox.textContent = '最后一次识别（' + source + '）：' + (clean || '（空）');
+  }
+  const hits = parseTagsFromText(clean);
+  if (hits.length < 3) {
+    scanNote('只读到 ' + hits.length + ' 条词条'
+      + (hits.length ? '（' + hits.map(h => TAGMAP[h.k].name).join('、') + '）' : '')
+      + '，把浮窗停进方框正中再等一秒。');
+    return;
+  }
+  const best = hits.slice().sort((a, b) => b.score - a.score).slice(0, 3).sort((a, b) => a.pos - b.pos);
+  const minScore = Math.min.apply(null, best.map(h => h.score));
+  addScanRecord({ slot:SCAN.slot, lines:best.map(h => h.k), score:minScore, source:source });
+}
+
+/* --- 入库 / 撤销 --- */
+function addScanRecord(o) {
+  const sig = scanSig(o.lines);
+  const list = state.inv[o.slot] || [];
+  const dup = list.some(it => scanSig(it.lines) === sig);
+  const rec = {
+    id: ++SCAN.seq, slot:o.slot, lines:o.lines.slice(),
+    score:o.score, source:o.source, added:false, dup:dup, pending:false
+  };
+  SCAN.records.unshift(rec);
+  if (SCAN.records.length > 60) SCAN.records.length = 60;
+
+  const label = o.lines.map(k => TAGMAP[k].name).join(' / ');
+  if (dup) {
+    scanNote('「' + label + '」库存里已经有同样的一件，跳过。');
+  } else if (SCAN.auto && o.score >= 0.72) {
+    state.inv[o.slot].push({ lines:o.lines.slice() });
+    state.demo = false;
+    rec.added = true;
+    state.solIndex = 0;
+    scanNote('已存入' + slotLabel(o.slot) + '：' + label);
+    renderAll();
+  } else {
+    rec.pending = true;
+    scanNote('读到的词条把握不大（' + Math.round(o.score * 100) + '%），请核对后点「入库」。');
+  }
+  renderScanLog();
+}
+
+function slotLabel(key) {
+  const s = SLOTS.filter(x => x.key === key)[0];
+  return s ? s.label : key;
+}
+
+function acceptScanRecord(id) {
+  const rec = SCAN.records.filter(r => r.id === id)[0];
+  if (!rec || rec.added) return;
+  state.inv[rec.slot].push({ lines:rec.lines.slice() });
+  state.demo = false;
+  rec.pending = false;
+  rec.added = true;
+  state.solIndex = 0;
+  scanNote('已存入' + slotLabel(rec.slot) + '：' + rec.lines.map(k => TAGMAP[k].name).join(' / '));
+  renderAll();
+}
+
+function undoScanRecord(id) {
+  const rec = SCAN.records.filter(r => r.id === id)[0];
+  if (!rec) return;
+  if (!rec.added) { rec.pending = false; renderScanLog(); return; }
+  const list = state.inv[rec.slot] || [];
+  const sig = scanSig(rec.lines);
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (scanSig(list[i].lines) === sig) { list.splice(i, 1); break; }
+  }
+  rec.added = false;
+  rec.undo = true;
+  state.solIndex = 0;
+  renderAll();
+}
+
+/* --- 渲染 --- */
+function renderScanSlots() {
+  const box = $('#scanSlots');
+  if (!box) return;
+  box.innerHTML = '';
+  SLOTS.forEach(s => {
+    const btn = el('button', 'slot-tab', s.label);
+    btn.dataset.active = (SCAN.slot === s.key) ? '1' : '0';
+    btn.appendChild(el('span', 'cnt', String((state.inv[s.key] || []).length)));
+    btn.onclick = () => {
+      SCAN.slot = s.key;
+      renderScanSlots();
+      scanNote('入库部位改成' + s.label + '。');
+    };
+    box.appendChild(btn);
+  });
+}
+
+function renderScanLog() {
+  const box = $('#scanLog');
+  if (!box) return;
+  box.innerHTML = '';
+  const logPill = $('#scanLogPill');
+  if (logPill) {
+    logPill.textContent = SCAN.records.filter(r => r.added).length + ' 件已入库';
+    logPill.dataset.state = SCAN.records.some(r => r.pending) ? 'part' : (SCAN.records.length ? 'ok' : 'zero');
+  }
+  if (!SCAN.records.length) {
+    box.appendChild(el('p', 'empty', '还没有识别记录。连上窗口后，每读到一件装备就会出现在这里。'));
+    return;
+  }
+  SCAN.records.forEach(rec => {
+    const row = el('div', 'scan-row');
+    row.appendChild(el('span', 'meta', '#' + rec.id + ' · ' + slotLabel(rec.slot)));
+    const chips = el('div', 'chips');
+    rec.lines.forEach(k => chips.appendChild(chipNode(k, false)));
+    row.appendChild(chips);
+
+    const flag = el('span', 'flag');
+    if (rec.added) { flag.textContent = '已入库'; }
+    else if (rec.undo) { flag.textContent = '已撤销'; flag.className = 'flag mute'; }
+    else if (rec.dup) { flag.textContent = '已存在'; flag.className = 'flag mute'; }
+    else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
+    row.appendChild(flag);
+
+    if (rec.pending) {
+      const okBtn = el('button', 'ghost', '入库');
+      okBtn.onclick = () => acceptScanRecord(rec.id);
+      row.appendChild(okBtn);
+    }
+    if (rec.added) {
+      const unBtn = el('button', 'ghost', '撤销');
+      unBtn.onclick = () => undoScanRecord(rec.id);
+      row.appendChild(unBtn);
+    }
+    box.appendChild(row);
+  });
+}
+
+function renderScan() {
+  renderScanSlots();
+  renderScanLog();
+  const autoBox = $('#scanAuto');
+  if (autoBox) autoBox.checked = SCAN.auto;
+  const region = $('#scanRegion');
+  if (region) {
+    region.textContent = SCAN.rect
+      ? ('区域：宽 ' + Math.round(SCAN.rect.w * 100) + '% · 高 ' + Math.round(SCAN.rect.h * 100) + '%')
+      : '区域：未框选';
+  }
+}
+
+/* --- 框选 --- */
+function drawRectOverlay() {
+  const box = $('#scanRect');
+  if (!box) return;
+  if (!SCAN.rect || !SCAN.stream) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.style.left = (SCAN.rect.x * 100) + '%';
+  box.style.top = (SCAN.rect.y * 100) + '%';
+  box.style.width = (SCAN.rect.w * 100) + '%';
+  box.style.height = (SCAN.rect.h * 100) + '%';
+}
+
+function bindScanRect() {
+  const stage = $('#scanStage');
+  if (!stage) return;
+  const at = e => {
+    const r = stage.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+    };
+  };
+  stage.addEventListener('pointerdown', e => {
+    if (!SCAN.stream || e.target.closest('button') || e.button !== 0) return;
+    e.preventDefault();
+    SCAN.drag = at(e);
+    try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!SCAN.drag) return;
+    const cur = at(e), st = SCAN.drag;
+    const r = {
+      x: Math.min(st.x, cur.x), y: Math.min(st.y, cur.y),
+      w: Math.abs(cur.x - st.x), h: Math.abs(cur.y - st.y)
+    };
+    if (r.w > 0.02 && r.h > 0.02) {
+      SCAN.rect = r;
+      drawRectOverlay();
+      const region = $('#scanRegion');
+      if (region) region.textContent = '区域：宽 ' + Math.round(r.w * 100) + '% · 高 ' + Math.round(r.h * 100) + '%';
+    }
+  });
+  const end = () => {
+    if (!SCAN.drag) return;
+    SCAN.drag = null;
+    if (SCAN.rect) scanNote('框好了，把鼠标停在装备上看词条。');
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+}
+
+/* --- 截图识别 --- */
+async function scanImageFile(file) {
+  if (!file) return;
+  if (!/^image\//.test(file.type || '')) { scanNote('这个文件不是图片。'); return; }
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { scanNote('这张图读不出来，换一张试试。'); return; }
+  const canvas = $('#scanCanvas');
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  canvas.getContext('2d').drawImage(bmp, 0, 0);
+  canvas.hidden = false;
+  $('#scanHint').hidden = true;
+  $('#scanRect').style.display = 'none';
+  const shot = $('#scanShotPill');
+  if (shot) {
+    shot.textContent = bmp.width + ' × ' + bmp.height;
+    shot.dataset.state = 'ok';
+  }
+  setScanPill('截图识别', 'part');
+  scanNote('正在读这张图…');
+  try {
+    await ensureWorker();
+    const r = await SCAN.worker.recognize(canvas);
+    handleOcrText(r.data.text, '截图');
+  } catch (e) {
+    setEngine('不可用（需要联网）');
+    scanNote('识别引擎没加载起来：' + ((e && e.message) || e));
+  }
+}
+
+function bootScan() {
+  $('#btnScanStart').onclick = startScan;
+  $('#btnScanStop').onclick = stopScan;
+  $('#btnScanRect').onclick = () => {
+    SCAN.rect = null;
+    drawRectOverlay();
+    renderScan();
+    scanNote('旧框已清掉，在画面上重新拖一个方框。');
+  };
+  $('#scanAuto').onchange = e => {
+    SCAN.auto = e.target.checked;
+    scanNote(SCAN.auto ? '读到 3 条就自动入库。' : '识别后先列出来，确认了再入库。');
+  };
+  bindScanRect();
+
+  const drop = $('#scanDrop');
+  const file = $('#scanFile');
+  $('#btnScanShot').onclick = () => file.click();
+  drop.onclick = () => file.click();
+  file.onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) scanImageFile(f);
+    e.target.value = '';
+  };
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.dataset.over = '1'; });
+  drop.addEventListener('dragleave', () => { drop.dataset.over = '0'; });
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.dataset.over = '0';
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) scanImageFile(f);
+  });
+  document.addEventListener('paste', e => {
+    if (state.page !== 'scan') return;
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image/') === 0) {
+        const f = items[i].getAsFile();
+        if (f) { scanImageFile(f); e.preventDefault(); }
+        return;
+      }
+    }
+  });
+}
+
 /* ===== 启动 ===== */
 function boot() {
   if (!load()) {
@@ -1432,6 +2066,7 @@ function boot() {
     if (e.key === 'Enter') { e.preventDefault(); commitField('desc', $('#custDesc').value); }
   };
   $('#custDesc').onchange = () => commitField('desc', $('#custDesc').value);
+  bootScan();
   renderAll();
 }
 document.addEventListener('DOMContentLoaded', boot);
