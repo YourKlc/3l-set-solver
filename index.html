@@ -382,7 +382,6 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
   <div class="bar">
     <div>
       <h1>Q区套装毕业词条求解器<small>每个部位选 1 件，凑满目标词条</small></h1>
-      <p id="leadNote">当前搭配：五职业 — 通用四类各 3 条，五职业各 1 条，Crit DMG 1 条</p>
     </div>
     <div class="tabs" id="pageTabs"></div>
   </div>
@@ -565,13 +564,13 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>填写规则</h2><span class="pill">上限 6</span></div>
+      <div class="card-head"><h2>填写规则</h2><span class="pill">每条上限 3</span></div>
       <p class="note" style="margin-top:0">
         <b>怎么填</b>：每个词条填「要凑到几条」，0 就是不作要求。6 个部位各上 1 件、每件 3 条，全场一共只有 18 条，
         所以合计超过 18 条不可能全部达成，页面会先提示你减回去。<br>
         <b>合计正好 18 条</b>：等于要求每一条都不能浪费，求出来的搭配里每一件都是满分词条。<br>
         <b>合计少于 18 条</b>：允许出现空转词条，求解器仍然优先把目标条数凑齐，剩下的位置可以放任意词条。<br>
-        <b>单条上限 6</b>：同一件装备的 3 条必须互不相同，所以同一条词条一件最多 1 次，6 件最多 6 次。<br>
+        <b>每条上限 3</b>：每条词条最多填 3 条，再多就填不上去了。<br>
         <b>多套搭配</b>：「五职业」是默认搭配，不能改名、不能删；点「＋ 新增搭配」会复制当前这套的条数，另存为一套新的，
         名称和备注都能随时改，也可以删掉。切换搭配在目标卡上方的标签页里点，两页的标签是同一套。
       </p>
@@ -593,6 +592,7 @@ const SLOTS = [
   { key:'shoe',   label:'鞋子' }
 ];
 
+const TARGET_MAX = 3;   /* 同一个词条最多凑 3 条 */
 const TAGS = [
   { k:'DL',      name:'Dimensional Leap', group:'core' },
   { k:'WH',      name:'White Hole',       group:'core' },
@@ -624,7 +624,7 @@ const DEFAULT_PRESET = {
 
 function cleanTargets(o) {
   const z = {};
-  TAGS.forEach(t => { z[t.k] = Math.max(0, Math.min(6, Math.round(Number(o && o[t.k]) || 0))); });
+  TAGS.forEach(t => { z[t.k] = Math.max(0, Math.min(TARGET_MAX, Math.round(Number(o && o[t.k]) || 0))); });
   return z;
 }
 function makePreset(p, keepId) {
@@ -648,13 +648,13 @@ function activeTargets() {
   const out = {};
   TAGS.forEach(t => {
     const n = Math.round(Number(p.targets[t.k]) || 0);
-    if (n > 0) out[t.k] = Math.min(6, n);
+    if (n > 0) out[t.k] = Math.min(TARGET_MAX, n);
   });
   return out;
 }
 function presetTotal(p) {
   let sum = 0;
-  TAGS.forEach(t => { sum += Math.max(0, Math.min(6, Math.round(Number(p.targets[t.k]) || 0))); });
+  TAGS.forEach(t => { sum += Math.max(0, Math.min(TARGET_MAX, Math.round(Number(p.targets[t.k]) || 0))); });
   return sum;
 }
 function nextPresetId() {
@@ -957,7 +957,6 @@ function renderTargets() {
     pill.textContent = '未设置';
     pill.dataset.state = 'zero';
     $('#modeNote').textContent = '这套搭配还没有目标词条：去右上角「毕业词条」页把它填起来。';
-    $('#leadNote').textContent = '当前搭配：' + activePreset().name + ' — 未设置';
     return;
   }
 
@@ -986,8 +985,6 @@ function renderTargets() {
   $('#modeNote').textContent = '「' + p.name + '」' + (p.desc ? p.desc : targetSummary(targets))
     + '，合计 ' + totalTarget + ' 条。'
     + (totalTarget > 18 ? '已超过 18 条上限，实际凑不满。' : '');
-  $('#leadNote').textContent = '当前搭配：' + p.name + ' — '
-    + (p.desc || targetSummary(targets));
 }
 
 /* ===== 渲染：搭配列表（毕业词条页）===== */
@@ -1019,19 +1016,19 @@ function renderCustom() {
   const box = $('#custGrid');
   box.innerHTML = '';
   TAGS.forEach(t => {
-    const v = Math.max(0, Math.min(6, Math.round(Number(p.targets[t.k]) || 0)));
+    const v = Math.max(0, Math.min(TARGET_MAX, Math.round(Number(p.targets[t.k]) || 0)));
     const cell = el('div', 'cust-cell');
     cell.dataset.on = (v > 0) ? '1' : '0';
     cell.appendChild(el('span', 'cname', t.name));
     const st = el('div', 'stepper');
     const minus = el('button', null, '\u2212');
     minus.title = p.builtin ? '默认搭配不可修改' : '减 1';
-    minus.disabled = p.builtin;
+    minus.disabled = p.builtin || v <= 0;
     minus.onclick = () => setCustom(t.k, v - 1);
     const val = el('span', 'v', String(v));
     const plus = el('button', null, '+');
-    plus.title = p.builtin ? '默认搭配不可修改' : '加 1';
-    plus.disabled = p.builtin;
+    plus.title = p.builtin ? '默认搭配不可修改' : (v >= TARGET_MAX ? '每条最多 3' : '加 1');
+    plus.disabled = p.builtin || v >= TARGET_MAX;
     plus.onclick = () => setCustom(t.k, v + 1);
     st.appendChild(minus);
     st.appendChild(val);
@@ -1079,7 +1076,7 @@ function renderCustomPrev() {
   const cur = {};
   const p = activePreset();
   TAGS.forEach(t => {
-    const n = Math.max(0, Math.min(6, Math.round(Number(p.targets[t.k]) || 0)));
+    const n = Math.max(0, Math.min(TARGET_MAX, Math.round(Number(p.targets[t.k]) || 0)));
     if (n > 0) cur[t.k] = n;
   });
   const keys = Object.keys(cur);
@@ -1123,7 +1120,7 @@ function renderCustomPrev() {
 function setCustom(k, v) {
   const p = activePreset();
   if (p.builtin) return;
-  p.targets[k] = Math.max(0, Math.min(6, Math.round(v) || 0));
+  p.targets[k] = Math.max(0, Math.min(TARGET_MAX, Math.round(v) || 0));
   state.solIndex = 0;
   renderAll();
 }
