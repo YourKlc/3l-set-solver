@@ -1533,7 +1533,7 @@ const SCAN = {
   lastHash:'', lastAt:0, busy:false,
   records:[], seq:0, raw:'',
   seen:Object.create(null), skipped:0, diag:[],
-  prevGrid:null, lastBox:null, queue:[], holdUntil:0, missCount:0
+  prevGrid:null, lastBox:null, queue:[], holdUntil:0, missCount:0, lastSig:null, lastEnqAt:0
 };
 
 function scanSig(lines) { return lines.slice().sort().join('|'); }
@@ -1683,6 +1683,8 @@ async function startScan() {
   SCAN.seen = Object.create(null);
   SCAN.skipped = 0;
   SCAN.lastHash = '';
+  SCAN.lastSig = null;
+  SCAN.lastEnqAt = 0;
   SCAN.prevGrid = null;
   SCAN.lastBox = null;
   SCAN.queue = [];
@@ -1770,6 +1772,30 @@ function hashCanvas(c) {
     h += ((d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) >> 4) & 15;
   }
   return h;
+}
+
+/* 粗签名：32x16 的灰度格子，用来判断「还是不是同一件浮窗」。
+   游戏画面每帧有细微抖动，逐像素哈希会一路误判成新浮窗，把队列塞爆。 */
+function sigOf(c) {
+  const t = document.createElement('canvas');
+  t.width = 32; t.height = 16;
+  const g = t.getContext('2d');
+  g.drawImage(c, 0, 0, 32, 16);
+  let d;
+  try { d = g.getImageData(0, 0, 32, 16).data; } catch (e) { return null; }
+  const out = [];
+  for (let i = 0; i < d.length; i += 4) out.push((d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) / 15);
+  return out;
+}
+
+function sigChanged(a, b) {
+  if (!a || !b || a.length !== b.length) return 999;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += b[i] - a[i];
+  const mean = sum / a.length;           /* 整体亮度变了（掉帧、色偏）不算换件 */
+  let n = 0;
+  for (let i = 0; i < a.length; i++) if (Math.abs(b[i] - a[i] - mean) > 9) n++;
+  return n;
 }
 
 /* --- 自动找浮窗：整窗共享时只看「刚刚变化的那一块」，把装备浮窗切出来再 OCR --- */
@@ -1889,10 +1915,12 @@ function leftOfSecondPanel(c, words) {
 /* 截取和识别分开：采集按固定节拍「拍」当前浮窗，内容变了才进队列让 OCR 读。
    一次 OCR 要一秒多，采集不等它，所以连续划过多件也不漏。 */
 function enqueueCrop(c) {
-  const h = hashCanvas(c);
-  if (h === SCAN.lastHash) return false;
-  SCAN.lastHash = h;
-  if (SCAN.queue.length > 6) SCAN.queue.shift();
+  const sig = sigOf(c);
+  if (sigChanged(sig, SCAN.lastSig) < 40) return false;   /* 还是那件浮窗（只是画面抖动/闪光） */
+  if (Date.now() - SCAN.lastEnqAt < 300) return false;   /* 一秒拍几十张会把队列塞爆 */
+  SCAN.lastSig = sig;
+  SCAN.lastEnqAt = Date.now();
+  if (SCAN.queue.length >= 3) return false;               /* 队列里已排着要读的，别把真件挤掉 */
   SCAN.queue.push({ canvas:c, at:Date.now() });
   dlog('拍下浮窗 ' + c.width + 'x' + c.height + '，队列 ' + SCAN.queue.length);
   return true;
@@ -2195,6 +2223,11 @@ function handleOcrText(text, source) {
     if (/SKILL|HOLOGR|SUPERCHARGED/.test(raw.toUpperCase())) {
       scanNote('看到了浮窗但没把词条读全，把浮窗在画面上停稳一点再等一秒。');
     }
+    return;
+  }
+  /* 共享窗口时，浮窗里连一个词条字样都没有（多半截到的是套装加成面板/界面文字），别记 */
+  if (source === '窗口' && !/SKILL|ENHANCEMENT|HOLOGRAM|DIMENSIONAL|WHITE HOLE|REGISTRY/.test(raw.toUpperCase())) {
+    dlog('没读到词条字样，这次不记');
     return;
   }
   addScanRecord({
