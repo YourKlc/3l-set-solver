@@ -361,6 +361,9 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 }
 .mini:hover{border-color:var(--accent);color:var(--accent)}
 .mini[aria-expanded="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.scan-toggle{display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 10px}
+.scan-toggle .chev{width:11px;height:11px;flex:none;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;transition:transform .22s ease}
+.scan-toggle[aria-expanded="true"] .chev{transform:rotate(180deg)}
 .scan-raw{
   margin-top:10px;border-top:1px solid var(--line);padding-top:10px;
   font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
@@ -408,7 +411,10 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 
         <div class="scan-inline">
           <div class="scan-inline-head">
-            <button class="mini" id="btnScanToggle" aria-expanded="false">识别游戏窗口</button>
+            <button class="mini scan-toggle" id="btnScanToggle" aria-expanded="false">
+              <span class="lbl">识别游戏窗口</span>
+              <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
             <span class="pill" id="scanPill" data-state="zero">未开始</span>
             <span class="hint">共享窗口后，划过的装备自动填进下面这格</span>
           </div>
@@ -836,7 +842,8 @@ function save() {
 /* 把一份存档数据装进 state（load 与导入共用） */
 function applyStore(d) {
   state.inv = normalizeInv(d.inv);
-  state.page = (d.page === 'custom') ? 'custom' : 'solve';
+  /* 每次打开都落在「求解器」页；搭配沿用上一次用的那套 */
+  state.page = 'solve';
   state.demo = !!d.demo;
 
   if (Array.isArray(d.presets) && d.presets.length) {
@@ -2655,7 +2662,9 @@ function setScanPanel(open) {
   if (body) body.hidden = !SCAN.panelOpen;
   if (btn) {
     btn.setAttribute('aria-expanded', SCAN.panelOpen ? 'true' : 'false');
-    btn.textContent = SCAN.panelOpen ? '收起识别' : '识别游戏窗口';
+    const lbl = btn.querySelector('.lbl');
+    if (lbl) lbl.textContent = SCAN.panelOpen ? '收起识别' : '识别游戏窗口';
+    else btn.textContent = SCAN.panelOpen ? '收起识别' : '识别游戏窗口';
   }
   if (!SCAN.panelOpen && SCAN.stream) stopScan();
 }
