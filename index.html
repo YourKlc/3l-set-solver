@@ -1953,13 +1953,15 @@ function leftOfSecondPanel(c, words) {
 
 /* 截取和识别分开：采集按固定节拍「拍」当前浮窗，内容变了才进队列让 OCR 读。
    一次 OCR 要一秒多，采集不等它，所以连续划过多件也不漏。 */
+const QUEUE_MAX = 10;              /* 最多排队等识别的浮窗张数 */
+
 function enqueueCrop(c) {
+  if (SCAN.queue.length >= QUEUE_MAX) return false;       /* 队列最多排 10 件，塞满时先不拍 */
   const sig = sigOf(c);
-  if (sigChanged(sig, SCAN.lastSig) < 40) return false;   /* 还是那件浮窗（只是画面抖动/闪光） */
-  if (Date.now() - SCAN.lastEnqAt < 300) return false;   /* 一秒拍几十张会把队列塞爆 */
+  if (sigChanged(sig, SCAN.lastSig) < 20) return false;   /* 还是那件浮窗（只是画面抖动/闪光） */
+  if (Date.now() - SCAN.lastEnqAt < 150) return false;   /* 一秒拍几十张会把队列塞爆 */
   SCAN.lastSig = sig;
   SCAN.lastEnqAt = Date.now();
-  if (SCAN.queue.length >= 3) return false;               /* 队列里已排着要读的，别把真件挤掉 */
   SCAN.queue.push({ canvas:c, at:Date.now() });
   dlog('拍下浮窗 ' + c.width + 'x' + c.height + '，队列 ' + SCAN.queue.length);
   return true;
