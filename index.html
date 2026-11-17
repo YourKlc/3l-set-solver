@@ -313,12 +313,21 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 }
 .scan-row .flag.warn{background:color-mix(in oklab,var(--warn) 16%,var(--panel));color:var(--warn)}
 .scan-row .flag.mute{background:color-mix(in oklab,var(--ink) 7%,var(--panel));color:var(--muted)}
-.scan-row .slot-pick{display:flex;flex-wrap:wrap;gap:4px;flex:1 1 100%}
+.scan-inline{
+  margin-bottom:12px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  background:color-mix(in oklab,var(--ink) 3%,var(--panel));
+}
+.scan-inline-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.scan-inline-head .hint{font-size:12px;color:var(--muted)}
+.scan-inline #scanBody{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.scan-log-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px}
+#scanLog{max-height:250px;overflow:auto;padding-right:2px}
 .mini{
   border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:inherit;
-  font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:5px;cursor:pointer;
+  font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:5px;cursor:pointer;
 }
 .mini:hover{border-color:var(--accent);color:var(--accent)}
+.mini[aria-expanded="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .scan-raw{
   margin-top:10px;border-top:1px solid var(--line);padding-top:10px;
   font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--muted);
@@ -356,6 +365,55 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
       <!-- ===== 添加装备 ===== -->
       <section class="card">
         <div class="card-head"><h2>加一件装备</h2><span class="pill" id="pickPill" data-state="zero">0 / 3 条</span></div>
+
+        <div class="scan-inline">
+          <div class="scan-inline-head">
+            <button class="mini" id="btnScanToggle" aria-expanded="false">识别游戏窗口</button>
+            <span class="pill" id="scanPill" data-state="zero">未开始</span>
+            <span class="hint">共享窗口后，划过的装备自动填进下面这格</span>
+          </div>
+          <div id="scanBody" hidden>
+            <p class="mode-note">
+              点「开始共享」，在弹出的列表里选游戏窗口（默认停在「窗口」页，游戏要窗口化运行），然后在画面上拖一个方框，
+              罩住整个装备浮窗（装备名 + 3 行词条）。读出来的词条会直接填进下面的部位和 3 行；第一次用需要联网加载识别引擎。
+            </p>
+            <div class="inv-tools" style="margin-top:0;border-top:0;padding-top:0">
+              <button class="ghost" id="btnScanStart">开始共享</button>
+              <button class="ghost" id="btnScanStop" disabled>停止</button>
+              <button class="ghost" id="btnScanRect" disabled>重新框选</button>
+              <span class="hint"><input type="checkbox" id="scanAuto" checked> 读到就直接加入库存</span>
+            </div>
+            <div class="scan-stage" id="scanStage">
+              <video id="scanVideo" autoplay muted playsinline class="scan-video"></video>
+              <canvas id="scanCanvas" hidden></canvas>
+              <div class="scan-rect" id="scanRect"></div>
+              <p class="empty" id="scanHint">还没连接窗口。开始共享后，在画面上按住鼠标拖出一个方框，罩住整个装备浮窗（装备名 + 3 行词条）。</p>
+            </div>
+            <div class="scan-bar">
+              <span class="hint" id="scanRegion">区域：未框选</span>
+              <span class="hint" id="scanSlotInfo">部位：自动识别</span>
+              <span class="hint" id="scanEngine">识别引擎：未加载</span>
+            </div>
+            <p class="mode-note" id="scanNote"></p>
+
+            <div class="scan-shot">
+              <div class="scan-drop" id="scanDrop">不方便共享窗口时，把装备截图拖到这里，或在页面里 Ctrl+V 粘贴</div>
+              <div class="inv-tools">
+                <button class="ghost" id="btnScanShot">选择截图</button>
+                <span class="pill" id="scanShotPill" data-state="zero">—</span>
+                <input type="file" id="scanFile" accept="image/*" hidden>
+              </div>
+            </div>
+
+            <div class="scan-log-head">
+              <span class="hint">识别记录</span>
+              <span class="pill" id="scanLogPill" data-state="zero">0 件已入库</span>
+            </div>
+            <div id="scanLog"></div>
+            <div class="scan-raw" id="scanRaw" hidden></div>
+          </div>
+        </div>
+
         <div class="slot-tabs" id="slotTabs"></div>
         <div class="tag-grid" id="tagGrid"></div>
         <div class="preview" id="preview"></div>
@@ -468,59 +526,7 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
     </section>
   </div>
 
-  <!-- ===== 视图：识别录入 ===== -->
-  <div id="viewScan" hidden>
-    <section class="card">
-      <div class="card-head">
-        <h2>窗口识别<span id="scanSub"></span></h2>
-        <span class="pill" id="scanPill" data-state="zero">未开始</span>
-      </div>
-      <p class="mode-note">
-        点「开始识别」后，在弹出的窗口列表里选中游戏窗口（游戏要窗口化运行）。把鼠标停在装备上，让整个浮窗露出来，
-        本页会读出装备名和 3 条词条，按装备名自动判断部位并入库，不用自己选。第一次用需要联网加载识别引擎。
-      </p>
-      <div class="inv-tools" style="margin-top:0;border-top:0;padding-top:0">
-        <button class="primary" id="btnScanStart" style="width:auto;padding:8px 16px">开始识别</button>
-        <button class="ghost" id="btnScanStop" disabled>停止</button>
-        <button class="ghost" id="btnScanRect" disabled>重新框选</button>
-        <span class="hint"><input type="checkbox" id="scanAuto" checked> 读到 3 条就自动入库</span>
-      </div>
-      <div class="scan-stage" id="scanStage">
-        <video id="scanVideo" autoplay muted playsinline class="scan-video"></video>
-        <canvas id="scanCanvas" hidden></canvas>
-        <div class="scan-rect" id="scanRect"></div>
-        <p class="empty" id="scanHint">还没连接窗口。开始识别后，在画面上按住鼠标拖出一个方框，罩住整个装备浮窗（装备名 + 3 行词条）。</p>
-      </div>
-      <div class="scan-bar">
-        <span class="hint" id="scanRegion">区域：未框选</span>
-        <span class="hint" id="scanSlotInfo">部位：自动识别</span>
-        <span class="hint" id="scanEngine">识别引擎：未加载</span>
-      </div>
-      <p class="mode-note" id="scanNote"></p>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>识别记录<span id="scanLogSub"></span></h2>
-        <span class="pill" id="scanLogPill" data-state="zero">0 件</span>
-      </div>
-      <div id="scanLog"></div>
-      <div class="scan-raw" id="scanRaw" hidden></div>
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>用截图识别</h2><span class="pill" id="scanShotPill" data-state="zero">—</span></div>
-      <p class="mode-note">
-        不方便共享窗口时，把装备浮窗的截图拖到下面，或者点「选择截图」、直接在页面里 Ctrl+V 粘贴。
-        截图最好带上装备名那一行，读出来的 3 条词条同样会按装备名自动存进对应部位。
-      </p>
-      <div class="scan-drop" id="scanDrop">把截图拖到这里，或按 Ctrl+V 粘贴</div>
-      <input type="file" id="scanFile" accept="image/*" hidden>
-      <div class="inv-tools">
-        <button class="ghost" id="btnScanShot">选择截图</button>
-      </div>
-    </section>
-  </div>
+  <!-- ===== 视图：识别录入（已并入「加一件装备」） ===== -->
 
 </div>
 
@@ -775,7 +781,7 @@ function save() {
 /* 把一份存档数据装进 state（load 与导入共用） */
 function applyStore(d) {
   state.inv = normalizeInv(d.inv);
-  state.page = (d.page === 'custom' || d.page === 'scan') ? d.page : 'solve';
+  state.page = (d.page === 'custom') ? 'custom' : 'solve';
   state.demo = !!d.demo;
 
   if (Array.isArray(d.presets) && d.presets.length) {
@@ -825,8 +831,7 @@ function renderPage() {
   box.innerHTML = '';
   const pages = [
     { k:'solve',  label:'求解器' },
-    { k:'custom', label:'毕业词条' },
-    { k:'scan',   label:'识别录入' }
+    { k:'custom', label:'毕业词条' }
   ];
   pages.forEach(p => {
     const btn = el('button', 'tab', p.label);
@@ -840,7 +845,6 @@ function renderPage() {
   });
   $('#viewSolve').hidden = (state.page !== 'solve');
   $('#viewCustom').hidden = (state.page !== 'custom');
-  $('#viewScan').hidden = (state.page !== 'scan');
 }
 
 /* ===== 渲染：搭配标签（求解器页）===== */
@@ -1505,7 +1509,7 @@ const OCR_CDN = {
 const SCAN = {
   stream:null, raf:null, timer:null, drawing:false,
   rect:null, drag:null,
-  slot:'hat', auto:true,
+  panelOpen:false, auto:true,
   worker:null, loading:null,
   lastHash:'', lastAt:0, busy:false,
   records:[], seq:0, raw:''
@@ -1689,7 +1693,7 @@ function hashCanvas(c) {
 }
 
 async function ocrTick() {
-  if (!SCAN.stream || SCAN.busy || !SCAN.rect || state.page !== 'scan') return;
+  if (!SCAN.stream || SCAN.busy || !SCAN.rect || !SCAN.panelOpen || state.page !== 'solve') return;
   if (!SCAN.worker) {
     try { await ensureWorker(); } catch (e) { setEngine('不可用（需要联网）'); return; }
   }
@@ -1835,36 +1839,52 @@ function handleOcrText(text, source) {
   addScanRecord({ slot:slot, lines:best.map(h => h.k), score:minScore, source:source });
 }
 
-/* --- 入库 / 撤销 --- */
+/* --- 填进「加一件装备」这一格 --- */
+function fillPick(slot, lines) {
+  if (slot) state.pick.slot = slot;
+  state.pick.lines = lines.slice(0, 3);
+  renderSlotTabs();
+  renderTagGrid();
+  renderPreview();
+}
+
 function addScanRecord(o) {
+  const lines = o.lines.slice();
+  const label = lines.map(k => TAGMAP[k].name).join(' / ');
+  /* 认不出部位也先把 3 条词条填好，用户点一下上面的部位就能「加入库存」 */
+  if (!o.slot) {
+    fillPick(null, lines);
+    if (SCAN.auto) scanNote('词条已经填好（' + label + '），但没认出部位：点一下上面的部位，再按「加入库存」。');
+    else scanNote('词条已经填好（' + label + '），但没认出部位：选个部位再按「加入库存」。');
+    return;
+  }
+
   const rec = {
-    id: ++SCAN.seq, slot:o.slot || null, lines:o.lines.slice(),
-    score:o.score, source:o.source, added:false, dup:false, pending:false, needSlot:!o.slot
+    id: ++SCAN.seq, slot:o.slot, lines:lines,
+    score:o.score, source:o.source, added:false, dup:false, pending:false
   };
   SCAN.records.unshift(rec);
   if (SCAN.records.length > 60) SCAN.records.length = 60;
 
-  const label = o.lines.map(k => TAGMAP[k].name).join(' / ');
-  if (!o.slot) {
-    scanNote('词条读出来了（' + label + '），但没认出部位。把框再往上拉一点，让装备名那一行也进方框。');
-    renderScanLog();
-    return;
-  }
-  const sig = scanSig(o.lines);
+  const sig = scanSig(lines);
   const list = state.inv[o.slot] || [];
   if (list.some(it => scanSig(it.lines) === sig)) {
     rec.dup = true;
-    scanNote('「' + label + '」' + slotLabel(o.slot) + '里已经有同样的一件，跳过。');
+    fillPick(o.slot, lines);
+    scanNote('「' + label + '」' + slotLabel(o.slot) + '里已经有同样的一件，没有重复加入。');
   } else if (SCAN.auto && o.score >= 0.72) {
-    state.inv[o.slot].push({ lines:o.lines.slice() });
+    state.inv[o.slot].push({ lines:lines.slice() });
     state.demo = false;
     rec.added = true;
     state.solIndex = 0;
-    scanNote('已存入' + slotLabel(o.slot) + '：' + label);
+    state.pick.lines = [];
+    scanNote('已加入库存：' + slotLabel(o.slot) + ' · ' + label);
     renderAll();
   } else {
     rec.pending = true;
-    scanNote('读到的词条把握不大（' + Math.round(o.score * 100) + '%），请核对后点「入库」。');
+    fillPick(o.slot, lines);
+    scanNote('已填好 ' + slotLabel(o.slot) + ' · ' + label
+      + '（把握 ' + Math.round(o.score * 100) + '%），核对无误按「加入库存」，或点记录里的「入库」。');
   }
   renderScanLog();
 }
@@ -1872,32 +1892,6 @@ function addScanRecord(o) {
 function slotLabel(key) {
   const s = SLOTS.filter(x => x.key === key)[0];
   return s ? s.label : key;
-}
-
-/* 部位没认出来时，点一下部位即入库 */
-function assignScanSlot(id, key) {
-  const rec = SCAN.records.filter(r => r.id === id)[0];
-  if (!rec || rec.added || !key) return;
-  const sig = scanSig(rec.lines);
-  const list = state.inv[key] || [];
-  if (list.some(it => scanSig(it.lines) === sig)) {
-    rec.slot = key;
-    rec.needSlot = false;
-    rec.dup = true;
-    scanNote(slotLabel(key) + '里已经有同样的一件，跳过。');
-    renderScanLog();
-    return;
-  }
-  rec.slot = key;
-  rec.needSlot = false;
-  state.inv[key].push({ lines:rec.lines.slice() });
-  state.demo = false;
-  rec.added = true;
-  state.solIndex = 0;
-  const slotInfo = $('#scanSlotInfo');
-  if (slotInfo) slotInfo.textContent = '部位：' + slotLabel(key);
-  scanNote('已存入' + slotLabel(key) + '：' + rec.lines.map(k => TAGMAP[k].name).join(' / '));
-  renderAll();
 }
 
 function acceptScanRecord(id) {
@@ -1935,7 +1929,7 @@ function renderScanLog() {
   const logPill = $('#scanLogPill');
   if (logPill) {
     logPill.textContent = SCAN.records.filter(r => r.added).length + ' 件已入库';
-    logPill.dataset.state = SCAN.records.some(r => r.pending || r.needSlot) ? 'part' : (SCAN.records.length ? 'ok' : 'zero');
+    logPill.dataset.state = SCAN.records.some(r => r.pending) ? 'part' : (SCAN.records.length ? 'ok' : 'zero');
   }
   if (!SCAN.records.length) {
     box.appendChild(el('p', 'empty', '还没有识别记录。连上窗口后，每读到一件装备就会出现在这里。'));
@@ -1952,19 +1946,9 @@ function renderScanLog() {
     if (rec.added) { flag.textContent = '已入库'; }
     else if (rec.undo) { flag.textContent = '已撤销'; flag.className = 'flag mute'; }
     else if (rec.dup) { flag.textContent = '已存在'; flag.className = 'flag mute'; }
-    else if (rec.needSlot) { flag.textContent = '选个部位'; flag.className = 'flag warn'; }
     else { flag.textContent = '待确认 ' + Math.round(rec.score * 100) + '%'; flag.className = 'flag warn'; }
     row.appendChild(flag);
 
-    if (rec.needSlot) {
-      const pick = el('div', 'slot-pick');
-      SLOTS.forEach(s => {
-        const b = el('button', 'mini', s.label);
-        b.onclick = () => assignScanSlot(rec.id, s.key);
-        pick.appendChild(b);
-      });
-      row.appendChild(pick);
-    }
     if (rec.pending) {
       const okBtn = el('button', 'ghost', '入库');
       okBtn.onclick = () => acceptScanRecord(rec.id);
@@ -2072,7 +2056,25 @@ async function scanImageFile(file) {
   }
 }
 
+function setScanPanel(open) {
+  SCAN.panelOpen = !!open;
+  const body = $('#scanBody');
+  const btn = $('#btnScanToggle');
+  if (body) body.hidden = !SCAN.panelOpen;
+  if (btn) {
+    btn.setAttribute('aria-expanded', SCAN.panelOpen ? 'true' : 'false');
+    btn.textContent = SCAN.panelOpen ? '收起识别' : '识别游戏窗口';
+  }
+  if (!SCAN.panelOpen && SCAN.stream) stopScan();
+}
+
 function bootScan() {
+  $('#btnScanToggle').onclick = () => {
+    setScanPanel(!SCAN.panelOpen);
+    if (SCAN.panelOpen && !SCAN.stream) {
+      scanNote('点「开始共享」，在弹出的列表里选游戏窗口，再在画面上框住整个浮窗。');
+    }
+  };
   $('#btnScanStart').onclick = startScan;
   $('#btnScanStop').onclick = stopScan;
   $('#btnScanRect').onclick = () => {
@@ -2083,7 +2085,7 @@ function bootScan() {
   };
   $('#scanAuto').onchange = e => {
     SCAN.auto = e.target.checked;
-    scanNote(SCAN.auto ? '读到 3 条就自动入库。' : '识别后先列出来，确认了再入库。');
+    scanNote(SCAN.auto ? '读到的装备直接加入库存。' : '读到的先填进下面这格，你按「加入库存」确认。');
   };
   bindScanRect();
 
@@ -2105,7 +2107,7 @@ function bootScan() {
     if (f) scanImageFile(f);
   });
   document.addEventListener('paste', e => {
-    if (state.page !== 'scan') return;
+    if (!SCAN.panelOpen || state.page !== 'solve') return;
     const items = (e.clipboardData && e.clipboardData.items) || [];
     for (let i = 0; i < items.length; i++) {
       if (items[i].type && items[i].type.indexOf('image/') === 0) {
