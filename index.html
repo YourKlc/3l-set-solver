@@ -162,7 +162,7 @@ body{
 .slot-tab[data-active="1"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .slot-tab .cnt{font-size:11px;font-weight:500;opacity:.85;font-variant-numeric:tabular-nums}
 
-.tag-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.tag-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 10px}
 @media (max-width:560px){.tag-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .tbtn{
   --c:var(--c-other);
@@ -183,14 +183,6 @@ body{
   content:attr(data-order);position:absolute;top:1px;right:4px;
   font-size:10px;color:var(--c);font-weight:700;
 }
-.preview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 10px}
-.pline{
-  border:1px dashed var(--line);border-radius:6px;padding:7px 8px;min-height:44px;
-  background:var(--sunk);display:flex;flex-direction:column;gap:2px;
-}
-.pline .ph{font-size:10px;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
-.pline .pv{font-size:12px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pline[data-empty="1"] .pv{color:var(--muted);font-weight:400}
 button.primary{
   width:100%;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);
   font-family:inherit;font-size:13px;font-weight:600;padding:9px;border-radius:6px;cursor:pointer;
@@ -473,7 +465,6 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 
         <div class="slot-tabs" id="slotTabs"></div>
         <div class="tag-grid" id="tagGrid"></div>
-        <div class="preview" id="preview"></div>
         <button class="primary" id="addBtn">加入库存</button>
       </section>
 
@@ -1226,15 +1217,7 @@ function renderTagGrid() {
 }
 
 function renderPreview() {
-  const box = $('#preview');
-  box.innerHTML = '';
-  for (let i = 0; i < 3; i++) {
-    const k = state.pick.lines[i];
-    const cell = el('div', 'pline');
-    cell.dataset.empty = k ? '0' : '1';
-    cell.appendChild(el('span', 'pv', k ? TAGMAP[k].name : '未选'));
-    box.appendChild(cell);
-  }
+  /* 选中了哪几条只在词条按钮上的角标和「0 / 3 条」胶囊里体现，不再单列一行预览 */
   const n = state.pick.lines.length;
   $('#addBtn').disabled = (n !== 3);
   const pill = $('#pickPill');
