@@ -107,9 +107,16 @@ body{
 .scan-dots i:nth-child(2){animation-delay:.22s}
 .scan-dots i:nth-child(3){animation-delay:.44s}
 @keyframes dotBlink{0%,65%,100%{opacity:.22}28%{opacity:1}}
+.scan-spin{
+  display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px;
+  border:2px solid color-mix(in oklab,var(--warn) 40%,transparent);border-top-color:var(--warn);
+  border-radius:50%;animation:scanSpin .9s linear infinite;
+}
+@keyframes scanSpin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){
   #scanPill[data-state="part"]{animation:none}
   .scan-dots i{animation:none;opacity:.6}
+  .scan-spin{animation:none;border-top-color:color-mix(in oklab,var(--warn) 40%,transparent)}
 }
 
 /* ===== 目标词条 ===== */
@@ -1583,8 +1590,13 @@ function setScanPill(text, st) {
   const p = $('#scanPill');
   if (!p) return;
   p.textContent = '';
+  /* 识别中：前面转个小圈，后面跟三个跳动的点，配合外圈呼吸光 */
+  if (st === 'part') {
+    const s = document.createElement('span');
+    s.className = 'scan-spin';
+    p.appendChild(s);
+  }
   p.appendChild(document.createTextNode(text));
-  /* 识别中：后面跟三个慢慢跳的点，配合呼吸光 */
   if (st === 'part') {
     const d = document.createElement('span');
     d.className = 'scan-dots';
@@ -1627,8 +1639,7 @@ function loadOcrScript() {
   return SCAN.loading;
 }
 
-async function ensureWorker() {
-  if (SCAN.worker) return SCAN.worker;
+async function makeWorker() {
   setEngine('加载中…');
   await loadOcrScript();
   if (!window.Tesseract) throw new Error('识别引擎不可用');
@@ -1658,6 +1669,19 @@ async function ensureWorker() {
   setEngine('就绪');
   dlog('识别引擎就绪');
   return worker;
+}
+
+/* 同一时间只建一个引擎：采集每秒问好几次，没这个锁一秒能建出十几个，
+   互相抢 CPU，页面卡到连识别中的动画都停住 */
+function ensureWorker() {
+  if (SCAN.worker) return Promise.resolve(SCAN.worker);
+  if (!SCAN.workerP) {
+    SCAN.workerP = makeWorker().then(
+      w => { SCAN.workerP = null; return w; },
+      e => { SCAN.workerP = null; throw e; }
+    );
+  }
+  return SCAN.workerP;
 }
 
 /* --- 窗口共享 --- */
@@ -1954,6 +1978,28 @@ function leftOfSecondPanel(c, words) {
   return out;
 }
 
+/* 按标题那一行定位整块浮窗：x 从标题左边留 36px，宽最多 560（一块浮窗的宽度），高最多 900 */
+function panelFromTitle(c, words) {
+  if (!c) return null;
+  let ty = null;
+  (words || []).forEach(w => {
+    const u = String(w.text || '').toUpperCase();
+    if (u.indexOf('SUPERCHARGED') < 0) return;
+    if (!ty || w.bbox.y0 < ty.y0) ty = w.bbox;
+  });
+  if (!ty) return null;
+  const x = Math.max(0, Math.round(ty.x0) - 36);
+  const y = Math.max(0, Math.round(ty.y0) - 30);
+  const w2 = Math.min(c.width - x, 560);
+  const h2 = Math.min(c.height - y, 900);
+  if (w2 < 200 || h2 < 240) return null;
+  const out = document.createElement('canvas');
+  out.width = w2;
+  out.height = h2;
+  out.getContext('2d').drawImage(c, x, y, w2, h2, 0, 0, w2, h2);
+  return out;
+}
+
 /* 从 OCR 文本里取装备名（Supercharged 后面那段的字母），用来比对是不是同一件 */
 function itemTitle(t) {
   const s = String(t || '').replace(/\s+/g, '');
@@ -2027,27 +2073,27 @@ async function pumpOcr() {
     let r = await SCAN.worker.recognize(job.canvas);
     let txt = r.data.text;
     let note = '';
+    let cur = job.canvas;
     /* 两件并排显示时只认左边那件，切掉右边再读一遍 */
     const lp = leftOfSecondPanel(job.canvas, r.data.words);
     if (lp) {
       r = await SCAN.worker.recognize(lp);
       txt = r.data.text;
+      cur = lp;
       note = ' 只读左边的浮窗';
       dlog('检测到两件浮窗，只读左边那件（' + lp.width + 'px 宽）');
     }
-    /* 只读到装备名、词条一条都没认出来：多半截短了，往下扩一截再读一次 */
-    if (!parseItemTags(txt).detected && /SUPERCHARGED|LIBAE/i.test(txt || '') && SCAN.lastBox && !job.wide) {
-      const lb = SCAN.lastBox;
-      const wide = cropBox({ x:lb.x - 20, y:lb.y - 20, w:lb.w + 40, h:Math.round(lb.h * 1.7) + 20 });
-      if (wide) {
-        dlog('词条没读全，扩大范围重读（' + wide.width + 'x' + wide.height + '）');
-        r = await SCAN.worker.recognize(wide);
+    /* 只读到装备名、词条一条都没认出来：按标题在「同一张截图」里重切一块整浮窗再读。
+       用同一张图是为了不把鼠标已经移到的下一件读成这一件 */
+    if (!parseItemTags(txt).detected && /SUPERCHARGED|LIBAE/i.test(txt || '')) {
+      const pc = panelFromTitle(cur, r.data.words);
+      if (pc) {
+        dlog('词条没读全，按标题重切浮窗重读（' + pc.width + 'x' + pc.height + '）');
+        r = await SCAN.worker.recognize(pc);
         const t2 = r.data.text;
-        /* 扩范围读的是「此刻」的画面，鼠标可能已经移到下一件了：
-           装备名对不上就不算，免得把别的装备记进来 */
-        if (parseItemTags(t2).detected && itemTitle(t2) && itemTitle(t2) === itemTitle(txt)) {
+        if (parseItemTags(t2).detected && itemTitle(t2) === itemTitle(txt)) {
           txt = t2;
-          note += ' 扩范围重读';
+          note += ' 重切重读';
         }
       }
     }
