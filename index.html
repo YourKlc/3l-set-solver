@@ -1247,6 +1247,10 @@ function renderInventory() {
           state.inv[s.key].splice(i, 1);
           state.demo = false;
           state.solIndex = 0;
+          /* 从库存里删掉后，这件再被识别到要能重新入库 */
+          delete SCAN.seen[s.key + '|' + scanSig(p.lines)];
+          SCAN.lastSig = null;
+          SCAN.lastHash = '';
           renderAll();
         };
         row.appendChild(del);
@@ -1472,6 +1476,8 @@ function clearInv() {
   state.inv = emptyInv();
   state.demo = false;
   state.solIndex = 0;
+  /* 清空库存后，之前判过的重复不再算重复 */
+  SCAN.seen = Object.create(null);
   renderAll();
 }
 function exportJson() {
@@ -2376,6 +2382,11 @@ function undoScanRecord(id) {
   }
   rec.added = false;
   rec.undo = true;
+  /* 撤销后这件就不在库存里了，下次再划到它要能重新入库：
+     清掉重复标记，并让「还是同一件浮窗」的判定失效，否则同一张浮窗不会再触发识别 */
+  delete SCAN.seen[rec.slot + '|' + sig];
+  SCAN.lastSig = null;
+  SCAN.lastHash = '';
   state.solIndex = 0;
   renderAll();
 }
