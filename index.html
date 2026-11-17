@@ -1806,6 +1806,15 @@ function matchTagsInLine(ln) {
   return Object.keys(best).map(k => best[k]).sort((a, b) => a.at - b.at);
 }
 
+/* 折行的后半截（"Skill Lv. +1" / "ATT Enhancement Skill Lv. +1"）不能单独算一条词条 */
+const CONT_WORDS = ['SKILL', 'ENHANCEMENT', 'LEVEL', 'LV', 'LY', 'ATT', 'ATK', 'MAGIC', 'POWER', 'ATTACK', 'AND', 'OF'];
+function isContinuation(ln, hits) {
+  if (hits && hits.length) return false;
+  const toks = tokensOf(ln);
+  if (!toks.length) return true;
+  return CONT_WORDS.indexOf(toks[0]) >= 0;
+}
+
 /* 这一行像不像装备浮窗里的一条词条：写的是「… Attack Skill Lv. +1 / … Enhancement Skill Lv. +1」，
    Dimensional Leap / White Hole 不带 Hologram 前缀，按短行判断；一行里挤进两条也会被拆开 */
 function lineIsTagLine(ln, hits) {
@@ -1823,25 +1832,47 @@ function lineIsTagLine(ln, hits) {
     if ((h.k === 'DL' || h.k === 'WH') && toks.length <= 4) return true;
     return false;
   }
-  /* 认不得的词条行（Other）：写着 Enhancement Skill / Attack Skill 又带等级或数值 */
-  return skill;
+  /* 认不得的词条行（Other）：写着 Enhancement Skill / Attack Skill 又带等级或数值，且不是折行的后半截 */
+  return skill && !isContinuation(ln, hits);
 }
 
-/* 把浮窗文字读成这件装备的词条：认得的按词条，认不得的记为 Other，不足 3 条用 Other 补齐 */
+/* 把浮窗文字读成这件装备的词条：认得的按词条，认不得的记为 Other，不足 3 条用 Other 补齐。
+   窄浮窗里一条词条会折成两行（"… Magic ATT Enhancement" / "Skill Lv. +1"），所以会和下一行拼一次再判 */
 function parseItemTags(text) {
   const lines = String(text || '').toUpperCase().split(/[\r\n]+/);
   const rows = [];
-  lines.forEach((ln, li) => {
+  const used = {};
+  const pushRow = (li, at, k, score, txt) => {
+    rows.push({ line:li, at:at, k:k, score:score, text:txt });
+  };
+  for (let li = 0; li < lines.length; li++) {
+    if (used[li]) continue;
+    const ln = lines[li];
     const hits = matchTagsInLine(ln);
-    if (!lineIsTagLine(ln, hits)) return;
-    if (!hits.length) {
-      rows.push({ line:li, at:0, k:'OTHER', score:0.86, text:ln.trim() });
-      return;
+    if (lineIsTagLine(ln, hits)) {
+      if (!hits.length) pushRow(li, 0, 'OTHER', 0.86, ln.trim());
+      else hits.forEach(h => pushRow(li, h.at, h.k, h.score, ln.trim()));
+      continue;
     }
-    hits.forEach((h, i) => {
-      rows.push({ line:li, at:h.at, k:h.k, score:h.score, text:ln.trim() });
-    });
-  });
+    /* 折行：只有词条行才会折（带 Hologram 前缀、或以 Enhancement 结尾），才把下一行拼上来看 */
+    const mergeable = /HOLOGR/.test(ln) || /ENHANCEMENT$/.test(ln.trim());
+    if (!mergeable) continue;
+    let merged = ln;
+    for (let step = 1; step <= 2 && li + step < lines.length; step++) {
+      if (used[li + step]) break;
+      const next = lines[li + step];
+      const nh = matchTagsInLine(next);
+      if (nh.length && lineIsTagLine(next, nh)) break;
+      merged = merged + ' ' + next;
+      const mh = matchTagsInLine(merged);
+      if (lineIsTagLine(merged, mh)) {
+        if (!mh.length) pushRow(li, 0, 'OTHER', 0.86, merged.trim());
+        else mh.forEach(h => pushRow(li, h.at, h.k, h.score, merged.trim()));
+        for (let s = 1; s <= step; s++) used[li + s] = true;
+        break;
+      }
+    }
+  }
   const picked = rows.sort((a, b) => a.line - b.line || a.at - b.at).slice(0, 3);
   const detected = picked.length;
   while (picked.length < 3) picked.push({ line:999, at:0, k:'OTHER', score:0.86, text:'' });
