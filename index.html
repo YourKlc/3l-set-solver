@@ -508,8 +508,8 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
 
       <p class="note">
         <b>求解规则</b>：6 个部位（帽子 / 上衣 / 裤子 / 披风 / 手套 / 鞋子）各取 1 件，每件 3 条互不相同的词条，合计 18 条。<br>
-        <b>目标搭配</b>：默认是「五职业」——Dimensional Leap、White Hole、Registry、ATK 各 3 条，五个职业各 1 条，Crit DMG 1 条；
-        想换目标就去「毕业词条」页新增一套搭配，填好条数、起好名字，之后在目标卡上方用标签页切换。<br>
+        <b>目标搭配</b>：默认是「默认泛用毕业搭配」——Dimensional Leap、White Hole、Registry、ATK 各 3 条，五个职业各 1 条，Crit DMG 1 条；
+        想换目标就去「目标词条编辑」页新增一套搭配，填好条数、起好名字，之后在目标卡上方用标签页切换。<br>
         <b>算法</b>：按部位顺序做记忆化动态规划求最优，枚举时用目标上限剪枝，因此能给出「可行方案总数」；
         18 条凑不齐时，给出最接近的方案，而不是直接报无解。<br>
         <b>差一件就齐</b>：某个部位还没有装备、且缺口不超过 3 条时，会单独列出「再添一件就能齐」——
@@ -571,7 +571,7 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
         <b>合计正好 18 条</b>：等于要求每一条都不能浪费，求出来的搭配里每一件都是满分词条。<br>
         <b>合计少于 18 条</b>：允许出现空转词条，求解器仍然优先把目标条数凑齐，剩下的位置可以放任意词条。<br>
         <b>每条上限 3</b>：每条词条最多填 3 条，再多就填不上去了。<br>
-        <b>多套搭配</b>：「五职业」是默认搭配，不能改名、不能删；点「＋ 新增搭配」会复制当前这套的条数，另存为一套新的，
+        <b>多套搭配</b>：「默认泛用毕业搭配」是默认搭配，不能改名、不能删；点「＋ 新增搭配」会复制当前这套的条数，另存为一套新的，
         名称和备注都能随时改，也可以删掉。切换搭配在目标卡上方的标签页里点，两页的标签是同一套。
       </p>
     </section>
@@ -616,7 +616,7 @@ TAGS.forEach(t => { TAGMAP[t.k] = t; });
 const DEFAULT_PRESET_ID = 'classic';
 const DEFAULT_PRESET = {
   id: DEFAULT_PRESET_ID,
-  name: '五职业',
+  name: '默认泛用毕业搭配',
   desc: '通用四类各 3 条，五个职业各 1 条，Crit DMG 1 条',
   builtin: true,
   targets: { DL:3, WH:3, REG:3, ATK:3, MAGE:1, PIRATE:1, THIEF:1, WARRIOR:1, BOW:1, CD:1 }
@@ -776,7 +776,7 @@ const STORE_KEY = 'ms-3l-solver-v2';
 const state = {
   page:'solve',
   activeId:'classic',
-  presets:[{ id:'classic', name:'五职业', desc:'通用四类各 3 条，五个职业各 1 条，Crit DMG 1 条', builtin:true,
+  presets:[{ id:'classic', name:'默认泛用毕业搭配', desc:'通用四类各 3 条，五个职业各 1 条，Crit DMG 1 条', builtin:true,
              targets:{ DL:3, WH:3, REG:3, ATK:3, MAGE:1, PIRATE:1, THIEF:1, WARRIOR:1, BOW:1, CD:1 } }],
   inv:null,
   demo:false,
@@ -793,7 +793,7 @@ function emptyInv() {
 function P(a, b, c) { return { lines:[a, b, c] }; }
 
 function demoInv() {
-  /* 用这套示例可以直接凑满「五职业」的 18 条，并且有 2 套不同选择；
+  /* 用这套示例可以直接凑满「默认泛用毕业搭配」的 18 条，并且有 2 套不同选择；
      hat #3 与 #1 词条完全相同，用来演示同款件不会算成两套方案 */
   return {
     hat:    [P('DL','WH','ATK'),  P('DL','ATK','MAGE'), P('DL','WH','ATK')],
@@ -861,7 +861,7 @@ function applyStore(d) {
     state.presets = list;
     state.activeId = list.some(p => p.id === d.activeId) ? d.activeId : DEFAULT_PRESET_ID;
   } else {
-    /* 旧存档迁移：原来只有「五职业 + 一份自定义」 */
+    /* 旧存档迁移：原来只有「默认泛用毕业搭配 + 一份自定义」 */
     state.presets = [makePreset(DEFAULT_PRESET)];
     const oldCustom = d.custom ? cleanTargets(d.custom) : null;
     const oldTotal = oldCustom ? TAGS.reduce((a, t) => a + (oldCustom[t.k] || 0), 0) : 0;
@@ -894,7 +894,7 @@ function renderPage() {
   box.innerHTML = '';
   const pages = [
     { k:'solve',  label:'求解器' },
-    { k:'custom', label:'毕业词条' }
+    { k:'custom', label:'目标词条编辑' }
   ];
   pages.forEach(p => {
     const btn = el('button', 'tab', p.label);
@@ -930,7 +930,7 @@ function renderMode() {
     box.appendChild(btn);
   });
   const add = el('button', 'mode-btn', '＋ 新增');
-  add.title = '去「毕业词条」页新增一套搭配';
+  add.title = '去「目标词条编辑」页新增一套搭配';
   add.onclick = () => { state.page = 'custom'; renderAll(); };
   box.appendChild(add);
 }
@@ -989,7 +989,7 @@ function renderTargets() {
   $('#targetSub').textContent = '共 ' + totalTarget + ' 条';
 }
 
-/* ===== 渲染：搭配列表（毕业词条页）===== */
+/* ===== 渲染：搭配列表（目标词条编辑页）===== */
 function renderPresets() {
   const box = $('#presetRow');
   box.innerHTML = '';
@@ -1341,7 +1341,7 @@ function renderResult() {
     pill.dataset.state = 'zero';
     const p = el('p', 'empty');
     if (!LAST) {
-      p.textContent = '这套搭配还没有目标词条：去右上角「毕业词条」页填起来，或切换到别的搭配。';
+      p.textContent = '这套搭配还没有目标词条：去右上角「目标词条编辑」页填起来，或切换到别的搭配。';
     } else if (!LAST.emptySlots.length) {
       p.textContent = '暂时没有可行搭配。';
     } else {
