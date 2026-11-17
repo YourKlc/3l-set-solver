@@ -1532,7 +1532,8 @@ const SCAN = {
   worker:null, loading:null,
   lastHash:'', lastAt:0, busy:false,
   records:[], seq:0, raw:'',
-  seen:Object.create(null), skipped:0, diag:[]
+  seen:Object.create(null), skipped:0, diag:[],
+  prevGrid:null, lastBox:null
 };
 
 function scanSig(lines) { return lines.slice().sort().join('|'); }
@@ -1682,6 +1683,8 @@ async function startScan() {
   SCAN.seen = Object.create(null);
   SCAN.skipped = 0;
   SCAN.lastHash = '';
+  SCAN.prevGrid = null;
+  SCAN.lastBox = null;
   scanNote(SCAN.rect
     ? '正在识别，把装备浮窗停在方框里；划过的每一件都会自动录入，重复的会跳过。'
     : '整窗识别中：划过一件装备就会录入一件，重复的会跳过，直到你点「停止」。框选一块浮窗区域会更快更准。');
@@ -1763,6 +1766,84 @@ function hashCanvas(c) {
   return h;
 }
 
+/* --- 自动找浮窗：整窗共享时只看「刚刚变化的那一块」，把装备浮窗切出来再 OCR --- */
+const GRID = 40;
+function grabGrid() {
+  const canvas = $('#scanCanvas');
+  if (!canvas || !canvas.width) return null;
+  const t = document.createElement('canvas');
+  t.width = GRID; t.height = GRID;
+  const g = t.getContext('2d');
+  g.drawImage(canvas, 0, 0, GRID, GRID);
+  try { return g.getImageData(0, 0, GRID, GRID).data; } catch (e) { return null; }
+}
+
+function changedBox(a, b) {
+  const mask = new Uint8Array(GRID * GRID);
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      const i = (y * GRID + x) * 4;
+      const d = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+      if (d > 30) mask[y * GRID + x] = 1;
+    }
+  }
+  /* 取最大的一块连通区域：浮窗出现 / 消失是两块，别把它们拼成超宽的一条 */
+  const seen = new Uint8Array(GRID * GRID);
+  let best = null;
+  for (let k = 0; k < mask.length; k++) {
+    if (!mask[k] || seen[k]) continue;
+    const stack = [k];
+    seen[k] = 1;
+    let n = 0, minx = GRID, miny = GRID, maxx = -1, maxy = -1;
+    while (stack.length) {
+      const p = stack.pop();
+      const x = p % GRID, y = (p - x) / GRID;
+      n++;
+      if (x < minx) minx = x;
+      if (x > maxx) maxx = x;
+      if (y < miny) miny = y;
+      if (y > maxy) maxy = y;
+      const nb = [[x-1,y], [x+1,y], [x,y-1], [x,y+1]];
+      for (let t = 0; t < 4; t++) {
+        const nx = nb[t][0], ny = nb[t][1];
+        if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID) continue;
+        const q = ny * GRID + nx;
+        if (mask[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+      }
+    }
+    if (!best || n > best.n) best = { n:n, x0:minx, y0:miny, x1:maxx, y1:maxy };
+  }
+  return best;
+}
+
+/* 返回一块「刚变了」的浮窗区域画布；变化太小（只是光标/动画）就返回 null */
+function autoCrop() {
+  const canvas = $('#scanCanvas');
+  if (!canvas || !canvas.width) return null;
+  const grid = grabGrid();
+  if (!grid) return null;
+  const prev = SCAN.prevGrid;
+  SCAN.prevGrid = grid;
+  if (!prev) return null;
+  const box = changedBox(prev, grid);
+  if (!box || box.n < 40) return null;           /* 变化不足 ~2.5%：忽略 */
+  const W = canvas.width, H = canvas.height;
+  const cw = W / GRID, ch = H / GRID;
+  let x0 = Math.max(0, Math.floor(box.x0 * cw) - 16);
+  let y0 = Math.max(0, Math.floor(box.y0 * ch) - 16);
+  let x1 = Math.min(W, Math.ceil((box.x1 + 1) * cw) + 16);
+  let y1 = Math.min(H, Math.ceil((box.y1 + 1) * ch) + 16);
+  /* 浮窗通常又高又窄；太扁、太小的变化直接跳过 */
+  if (x1 - x0 < 160 || y1 - y0 < 160) return null;
+  if ((x1 - x0) * (y1 - y0) > W * H * 0.7) { x0 = 0; y0 = 0; x1 = W; y1 = H; }
+  const c = document.createElement('canvas');
+  c.width = x1 - x0;
+  c.height = y1 - y0;
+  c.getContext('2d').drawImage(canvas, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+  SCAN.lastBox = { x:x0, y:y0, w:c.width, h:c.height };
+  return c;
+}
+
 async function ocrTick() {
   if (!SCAN.stream || SCAN.busy || !SCAN.panelOpen || state.page !== 'solve') return;
   if (!SCAN.worker) {
@@ -1772,17 +1853,24 @@ async function ocrTick() {
       return;
     }
   }
-  const c = cropCanvas();
-  if (!c) return;
-  const hash = hashCanvas(c);
-  if (hash === SCAN.lastHash && Date.now() - SCAN.lastAt < 2500) return;
-  SCAN.lastHash = hash;
+  let c;
+  if (SCAN.rect) {
+    c = cropCanvas();
+    if (!c) return;
+    const hash = hashCanvas(c);
+    if (hash === SCAN.lastHash && Date.now() - SCAN.lastAt < 2500) return;
+    SCAN.lastHash = hash;
+  } else {
+    c = autoCrop();
+    if (!c) return;
+  }
   SCAN.lastAt = Date.now();
   SCAN.busy = true;
   setScanPill('识别中', 'part');
   try {
     const r = await SCAN.worker.recognize(c);
-    dlog('OCR ' + c.width + 'x' + c.height + ' 读到 ' + String(r.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 90));
+    const boxTxt = SCAN.lastBox ? ' 浮窗≈' + SCAN.lastBox.w + 'x' + SCAN.lastBox.h : '';
+    dlog('OCR ' + c.width + 'x' + c.height + boxTxt + ' 读到 ' + String(r.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 90));
     handleOcrText(r.data.text, '窗口');
   } catch (e) {
     scanNote('识别出错：' + ((e && e.message) || e));
@@ -2008,7 +2096,10 @@ function handleOcrText(text, source) {
     + ' 词条=' + item.lines.join('/') + '（读到 ' + item.detected + ' 条，把握 '
     + Math.round(item.score * 100) + '%）');
   if (!item.detected) {
-    scanNote('没认出词条行，把装备浮窗正对着画面再等一秒（框一小块区域会更准）。');
+    /* 浮窗划走时截到的是背景，别弹提示；只有确实看到浮窗文字却没读全才提醒 */
+    if (/SKILL|HOLOGR|SUPERCHARGED/.test(raw.toUpperCase())) {
+      scanNote('看到了浮窗但没把词条读全，把浮窗在画面上停稳一点再等一秒。');
+    }
     return;
   }
   addScanRecord({ slot:slot, lines:item.lines, detected:item.detected, score:item.score, source:source });
