@@ -96,6 +96,21 @@ body{
 .pill[data-state="part"]{background:color-mix(in oklab,var(--warn) 18%,var(--panel));border-color:transparent;color:var(--warn)}
 .pill[data-state="over"]{background:color-mix(in oklab,var(--bad) 16%,var(--panel));border-color:transparent;color:var(--bad)}
 .pill[data-state="zero"]{background:var(--sunk);border-color:var(--line);color:var(--muted)}
+/* 识别中的呼吸光 + 三点跳动 */
+#scanPill[data-state="part"]{animation:pillPulse 1.5s ease-in-out infinite}
+@keyframes pillPulse{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in oklab,var(--warn) 38%,transparent)}
+  55%{box-shadow:0 0 0 6px color-mix(in oklab,var(--warn) 0%,transparent)}
+}
+.scan-dots{display:inline-block;margin-left:3px}
+.scan-dots i{font-style:normal;opacity:.28;animation:dotBlink 1.2s infinite}
+.scan-dots i:nth-child(2){animation-delay:.22s}
+.scan-dots i:nth-child(3){animation-delay:.44s}
+@keyframes dotBlink{0%,65%,100%{opacity:.22}28%{opacity:1}}
+@media (prefers-reduced-motion: reduce){
+  #scanPill[data-state="part"]{animation:none}
+  .scan-dots i{animation:none;opacity:.6}
+}
 
 /* ===== 目标词条 ===== */
 .target-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
@@ -1567,7 +1582,15 @@ function scanNote(text) {
 function setScanPill(text, st) {
   const p = $('#scanPill');
   if (!p) return;
-  p.textContent = text;
+  p.textContent = '';
+  p.appendChild(document.createTextNode(text));
+  /* 识别中：后面跟三个慢慢跳的点，配合呼吸光 */
+  if (st === 'part') {
+    const d = document.createElement('span');
+    d.className = 'scan-dots';
+    for (let i = 0; i < 3; i++) d.appendChild(document.createElement('i'));
+    p.appendChild(d);
+  }
   p.dataset.state = st || 'zero';
 }
 function setEngine(text) {
