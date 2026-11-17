@@ -408,6 +408,21 @@ function solveSet(slotPieces, targets, comboLimit) {
   const empty = tgt.map(() => 0);
   const totalTarget = tgt.reduce((a, b) => a + b, 0);
 
+  /* 同部位里词条完全相同的件视为等价：方案按「词条组合」计数，不按件计数。
+     每类只保留一个代表，并记住它在本部位库存里的序号（显示用第一个）。 */
+  const slotSets = slotPieces.map(list => {
+    const seen = new Map();
+    const out = [];
+    list.forEach((p, i) => {
+      const sig = p.lines.map(l => String(l)).sort().join('|');
+      if (seen.has(sig)) { seen.get(sig).count += 1; return; }
+      const entry = { piece:p, index:i, count:1 };
+      seen.set(sig, entry);
+      out.push(entry);
+    });
+    return out;
+  });
+
   function apply(counts, piece) {
     const c = counts.slice();
     let gain = 0;
@@ -426,8 +441,8 @@ function solveSet(slotPieces, targets, comboLimit) {
     const hit = memo.get(key);
     if (hit) return hit;
     let bs = -Infinity, bw = 0;
-    for (let p = 0; p < slotPieces[i].length; p++) {
-      const [c2, g] = apply(counts, slotPieces[i][p]);
+    for (let p = 0; p < slotSets[i].length; p++) {
+      const [c2, g] = apply(counts, slotSets[i][p].piece);
       const r = best(i + 1, c2);
       if (r.ways === 0) continue;
       const tot = g + r.score;
@@ -452,11 +467,11 @@ function solveSet(slotPieces, targets, comboLimit) {
     (function walk(i, counts, remain) {
       if (combos.length >= comboLimit) return;
       if (i === slotPieces.length) { combos.push(path.slice()); return; }
-      for (let p = 0; p < slotPieces[i].length; p++) {
-        const [c2, g] = apply(counts, slotPieces[i][p]);
+      for (let p = 0; p < slotSets[i].length; p++) {
+        const [c2, g] = apply(counts, slotSets[i][p].piece);
         const r = best(i + 1, c2);
         if (r.ways === 0 || g + r.score !== remain) continue;
-        path.push({ slot:i, pieceIndex:p, piece:slotPieces[i][p], gain:g });
+        path.push({ slot:i, pieceIndex:slotSets[i][p].index, piece:slotSets[i][p].piece, gain:g });
         walk(i + 1, c2, remain - g);
         path.pop();
         if (combos.length >= comboLimit) return;
@@ -501,11 +516,11 @@ function P(a, b, c) { return { lines:[a, b, c] }; }
 
 function demoInv() {
   return {
-    hat:    [P('DL','WH','ATK'),  P('DL','ATK','MAGE')],
-    top:    [P('DL','REG','BOW'), P('WH','MAGE','CD'), P('DL','REG','BOW')],
+    hat:    [P('DL','WH','ATK'),  P('DL','ATK','MAGE'), P('DL','WH','REG')],
+    top:    [P('DL','REG','BOW'), P('WH','MAGE','CD')],
     bottom: [P('WH','CD','BOW'),  P('DL','CD','WARRIOR')],
     cape:   [P('REG','ATK','CD'), P('THIEF','PIRATE','WH')],
-    glove:  [P('DL','WH','REG'),  P('ATK','REG','OTHER')],
+    glove:  [P('DL','WH','REG'),  P('ATK','REG','OTHER'), P('DL','WH','ATK')],
     shoe:   [P('ATK','BOW','CD'), P('BOW','CD','DL')]
   };
 }
@@ -914,22 +929,30 @@ function renderResult() {
   status.appendChild(document.createTextNode(complete ? ' · 目标全部达成' : ' · 已拿下的目标条数'));
   body.appendChild(status);
 
+  const shown = Math.min(LAST.ways, LAST.combos.length);
   const sub = el('div', 'status');
-  sub.appendChild(document.createTextNode(
-    complete
-      ? ('可行方案共 ' + LAST.ways + ' 套' + (LAST.ways > 1 ? '，用下方按钮切换查看。' : '。'))
-      : ('共 ' + LAST.ways + ' 套同等最优的搭配。')
-  ));
+  let subText;
+  if (complete) {
+    subText = '可行方案共 ' + LAST.ways + ' 套';
+    if (LAST.ways > 1) {
+      subText += (shown < LAST.ways) ? ('，下方可浏览前 ' + shown + ' 套。') : '，用下方按钮切换查看。';
+    } else {
+      subText += '。';
+    }
+  } else {
+    subText = '共 ' + LAST.ways + ' 套同等最优的搭配。';
+  }
+  sub.appendChild(document.createTextNode(subText));
   body.appendChild(sub);
 
   pill.textContent = complete ? '完成' : '最优';
   pill.dataset.state = complete ? 'ok' : 'part';
 
-  if (LAST.ways > 1) {
+  if (shown > 1) {
     const nav = el('div', 'nav');
     const prev = el('button', 'ghost', '\u2190 上一套');
     const next = el('button', 'ghost', '下一套 \u2192');
-    const label = el('span', 'label', '方案 ' + (Math.min(state.solIndex, LAST.combos.length - 1) + 1) + ' / ' + LAST.ways);
+    const label = el('span', 'label', '方案 ' + (Math.min(state.solIndex, LAST.combos.length - 1) + 1) + ' / ' + shown);
     prev.disabled = false;
     prev.onclick = () => {
       state.solIndex = (state.solIndex - 1 + LAST.combos.length) % LAST.combos.length;
