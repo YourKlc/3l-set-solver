@@ -254,11 +254,12 @@ button.del:hover{color:var(--bad)}
 .sol-row .tagno{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .gap-hint{font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:10px}
 .gap-row{
-  display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;align-items:center;
+  display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:8px;align-items:center;
   border:1px solid var(--line);border-radius:7px;padding:8px 10px;background:var(--sunk);
 }
 .gap-row + .gap-row{margin-top:6px}
-.gap-row .k{font-size:12px;color:var(--muted)}
+.gap-row .k{font-size:12.5px;font-weight:700;color:var(--ink)}
+.gap-row .rep{font-size:11.5px;color:var(--muted);white-space:nowrap}
 .empty{font-size:12.5px;color:var(--muted);line-height:1.7}
 .note{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.75}
 .note b{color:var(--ink);font-weight:600}
@@ -512,8 +513,8 @@ button.cust-apply{width:auto;padding:8px 16px;flex:0 0 auto}
         想换目标就去「目标词条编辑」页新增一套搭配，填好条数、起好名字，之后在目标卡上方用标签页切换。<br>
         <b>算法</b>：按部位顺序做记忆化动态规划求最优，枚举时用目标上限剪枝，因此能给出「可行方案总数」；
         18 条凑不齐时，给出最接近的方案，而不是直接报无解。<br>
-        <b>差一件就齐</b>：某个部位还没有装备、且缺口不超过 3 条时，会单独列出「再添一件就能齐」——
-        说明这件装备带哪几条词条就能凑满目标（多出来的词条不计数）。
+        <b>差一件就齐</b>：自动逐部位检查——在这个部位再添 1 件（原来没有就是补空位，已有就是换掉现有那件）就能凑满时，
+        会列出这件装备需要带的词条（多出来的词条不计数）。
       </p>
     </div>
   </div>
@@ -1290,8 +1291,10 @@ function renderInventory() {
   $('#invSub').textContent = state.demo ? '示例数据' : '';
 }
 
-/* ===== 渲染：再添一件就能齐 ===== */
-function renderGapPanel(gaps) {
+/* ===== 渲染：再添一件就能齐 =====
+   逐部位验证：把该部位现有那件（若有）拿走，再补 1 件进去，剩余缺口是否
+   能被一件装备（最多 3 条互不相同的词条）一次补满。空位和已有装备的部位都算。 */
+function renderGapPanel(combo, counts) {
   const card = $('#gapCard');
   const body = $('#gapBody');
   const pill = $('#gapPill');
@@ -1301,31 +1304,50 @@ function renderGapPanel(gaps) {
   sub.textContent = '';
 
   if (!LAST || !LAST.combos.length || LAST.maxScore >= LAST.totalTarget) return;
-  /* 只认「恰好空着 1 个部位、且缺的每条都只差 1 条、合计不超过 3 条」的情形：
-     一件装备最多 3 条互不相同的词条，可一次补齐。 */
-  if (LAST.emptySlots.length !== 1) return;
-  if (!gaps.length || gaps.some(g => g.miss !== 1)) return;
-  const total = gaps.reduce((a, g) => a + g.miss, 0);
-  if (total < 1 || total > 3) return;
 
-  const slot = LAST.emptySlots[0];
+  const chosen = {};
+  combo.forEach(step => { chosen[step.slot] = step; });
+
+  const cands = [];
+  SLOTS.forEach((s, i) => {
+    const step = chosen[i];
+    const isEmpty = !step;
+    if (isEmpty && LAST.emptySlots.indexOf(s.label) < 0) return;
+    const base = {};
+    LAST.keys.forEach(k => { base[k] = counts[k] || 0; });
+    if (step) step.piece.lines.forEach(k => { if (base[k] !== undefined) base[k] -= 1; });
+
+    const need = [];
+    let ok = true;
+    LAST.keys.forEach(k => {
+      const miss = LAST.targets[k] - base[k];
+      if (miss > 0) {
+        if (miss > 1) ok = false;   /* 同一件不会出现两条相同词条，补不上 */
+        need.push(k);
+      }
+    });
+    if (!ok || !need.length || need.length > 3) return;
+    cands.push({ label:s.label, tags:need, idx:step ? step.pieceIndex + 1 : 0 });
+  });
+
+  if (!cands.length) return;
   card.hidden = false;
-  pill.textContent = '缺' + slot;
   pill.dataset.state = 'part';
-  sub.textContent = ' · 差 ' + total + ' 条';
+  pill.textContent = '差 1 件';
+  sub.textContent = ' · ' + cands.length + ' 个部位可选';
 
   body.appendChild(el('p', 'gap-hint',
-    '「' + slot + '」补 1 件就能凑满目标。这件装备只要带齐下面任一组词条就行，多出来的词条不计数：'));
+    '下面这些部位再添 1 件就能凑满目标：这件只要带齐该行词条即可，多出来的词条不计数。'));
 
-  for (let size = total; size <= 3; size++) {
+  cands.forEach(c => {
     const row = el('div', 'gap-row');
-    row.appendChild(el('div', 'k', size + ' 条词条'));
+    row.appendChild(el('div', 'k', c.label));
     const chips = el('div', 'chips');
-    gaps.forEach(g => chips.appendChild(chipNode(g.k, false)));
-    for (let f = size - total; f > 0; f--) chips.appendChild(el('span', 'chip empty', '任意'));
+    c.tags.forEach(k => chips.appendChild(chipNode(k, false)));
     row.appendChild(chips);
+    row.appendChild(el('div', 'rep', c.idx ? ('换掉 #' + c.idx) : '空位补 1 件'));
     body.appendChild(row);
-  }
+  });
 }
 
 /* ===== 渲染：结果 ===== */
@@ -1420,14 +1442,7 @@ function renderResult() {
   });
   body.appendChild(sol);
 
-  /* 缺口 */
-  const gaps = [];
-  LAST.keys.forEach(k => {
-    const got = counts[k] || 0;
-    const need = LAST.targets[k];
-    if (got < need) gaps.push({ k: k, miss: need - got });
-  });
-  renderGapPanel(gaps);
+  renderGapPanel(combo, counts);
 }
 
 /* ===== 主渲染 ===== */
