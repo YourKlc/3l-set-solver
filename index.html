@@ -2127,8 +2127,11 @@ function lineIsTagLine(ln, hits) {
   hits = hits || matchTagsInLine(ln);
   const toks = tokensOf(ln);
   if (!toks.length) return false;
+  /* 词条行一定带等级（"Lv. +1"）；能力值、Required Job、套装效果那些行不算 */
+  const hasLv = /(LV|LY)\s*[.,]?\s*\+?\s*\d/.test(ln) || /(LV|LY)\s*\./.test(ln);
+  const skillNum = /SKILL/.test(ln) && /\d/.test(ln);
+  if (!hasLv && !skillNum) return false;
   const num = /\d/.test(ln) || /%/.test(ln);
-  const hasLv = /(LV|LY)\s*\./.test(ln) || /\+ ?1($|[^0-9])/.test(ln) || /%/.test(ln);
   const skill = /SKILL/.test(ln) && (hasLv || num);
   if (hits.length >= 2) return true;
   if (hits.length === 1) {
@@ -2180,6 +2183,13 @@ function parseItemTags(text) {
     }
   }
   const picked = rows.sort((a, b) => a.line - b.line || a.at - b.at).slice(0, 3);
+  /* 一件装备不会有两条一样的词条：重复的那条按 Other 处理，避免读错时出现 REG/REG */
+  const seenK = {};
+  picked.forEach(r => {
+    if (r.k === 'OTHER') return;
+    if (seenK[r.k]) { r.k = 'OTHER'; r.score = Math.min(r.score, 0.86); }
+    else seenK[r.k] = true;
+  });
   const detected = picked.length;
   while (picked.length < 3) picked.push({ line:999, at:0, k:'OTHER', score:0.86, text:'' });
   const lines3 = picked.map(r => r.k);
