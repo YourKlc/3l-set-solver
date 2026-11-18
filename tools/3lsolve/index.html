@@ -2805,8 +2805,9 @@ function bootScan() {
 /* ===== 启动 ===== */
 function boot() {
   if (!load()) {
-    state.inv = normalizeInv(demoInv());
-    state.demo = true;
+    /* 首次打开不灌示例装备：库存留空，想看示例自己点「载入示例」 */
+    state.inv = emptyInv();
+    state.demo = false;
   }
   $('#addBtn').onclick = addPiece;
   $('#btnDemo').onclick = loadDemo;
